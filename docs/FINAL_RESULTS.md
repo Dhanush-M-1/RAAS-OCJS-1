@@ -179,6 +179,7 @@ The 256 MiB column is the deployable result. The 128 MiB tier does not work
 | Original claim | Status |
 |---|---|
 | "over 90% of solutions used less than 25 MiB" | **76.8%** — not supportable |
+| "94.45% held-out accuracy" | Unsupported by the paper's own Table II. The table matches `model-training/README.md` (unified **83.71%**), not `artifacts/model_comparison.csv` (**94.45%**). The two artifact sets conflict on every model (C++ 90.01 vs 95.45, Python 79.45 vs 98.88). README states the most recent run is authoritative; the CSV's test-over-CV gap (84.73 → 94.45) suggests a different or leakier split |
 | 47.68% RAM saved | 47.22% is **Reactive's**; Hybrid is 22.45% |
 | 21.58% CPU saving | 22.09% is Reactive's; Hybrid is 9.18%. Metric is *reserved* core-hours, not consumed |
 | 28 adaptive slots | **56** at 256 MiB (14,336 / 256) |
