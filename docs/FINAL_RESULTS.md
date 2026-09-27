@@ -49,10 +49,13 @@ Hybrid alike.
 
 | Language | Promotion (promoted strategies) | Verdict | Baseline peak |
 |---|---|---|---|
-| Python | 248 / 267 ms | AC | 221.7 MB |
-| C | 300 / 326 ms | AC | 199.6 MB |
-| C++ | 500 / 578 ms | AC | 205.0 MB |
-| Java | 797 / 808 ms | MLE | 253.8 MB |
+| Python | 236 / 260 ms | AC | 221.8 MB |
+| C | 286 / 313 ms | AC | 203.6 MB |
+| C++ | 487 / 493 ms | AC | 203.0 MB |
+| Java | 731 / 763 ms | MLE | 253.8 MB |
+
+Light-program peaks: C 21.3 MB, C++ 6.8 MB, Python 13.6 MB, Java 25.1 MB.
+79.7% of AC runs (55/69) used under 25 MiB.
 
 Java's promotion is recorded as completing, and it still ends in MLE. The
 watermark fires and the limit is lifted, but only after HotSpot has committed
@@ -100,10 +103,10 @@ Seeded. Reserved memory and reserved CPU-core-hours.
 
 | Strategy | Reserved GB | Saved vs static | Reserved core-hrs | Wasted |
 |---|---|---|---|---|
-| Baseline | 20,000.00 | — | 4.832 | 97.51% |
-| Predictive | 11,326.25 | 43.37% | 4.074 | 97.16% |
-| **Reactive** | **9,846.88** | **50.77%** | **3.931** | 96.74% |
-| Hybrid | 15,136.25 | 24.32% | 4.408 | 97.86% |
+| Baseline | 20,000.00 | — | 4.540 | 97.47% |
+| Predictive | 11,313.12 | 43.43% | 3.869 | 97.14% |
+| **Reactive** | **9,805.62** | **50.97%** | **3.751** | 96.67% |
+| Hybrid | 15,123.12 | 24.38% | 4.287 | 97.84% |
 
 **Reactive reserves ~1.5x less than Hybrid.** Hybrid pre-assigns every
 submission it predicts heavy to the uncapped tier; those carry no reservation
@@ -128,7 +131,7 @@ recovers most of the wait, but at 186% host memory utilisation.
 
 ### 128 MiB tier (112 adaptive slots)
 
-Baseline 7 slots: 15,722.8 ms wait, 63.7 s drain. Adaptive: 0.0 ms, ~31.2 s.
+Baseline 7 slots: 14,011.0 ms wait, 59.2 s drain. Overcommitted 14 slots: 433.9 ms, 31.6 s. Adaptive: 0.0 ms, 31.1 s.
 
 ## 6. AWS EC2 provisioning projection (theoretical)
 
@@ -142,7 +145,7 @@ Baseline 7 slots: 15,722.8 ms wait, 63.7 s drain. Adaptive: 0.0 ms, ~31.2 s.
 | VMs for 500-sub burst | 36 | 5 (**86.1%**) | 3 (**91.7%**) |
 | Cluster hourly cost | USD 24.48 | USD 3.40 | USD 2.04 |
 | **Hourly saving** | — | **USD 21.08** | **USD 22.44** |
-| 10k RAM reserved | 20,000 GB | 10,485.25 GB (**47.57%**) | 9,846.88 GB (50.77%) |
+| 10k RAM reserved | 20,000 GB | 10,485.25 GB (**47.57%**) | 9,805.62 GB (50.97%) |
 
 The 256 MiB column is the deployable result. 128 MiB is not safe for JVM
 submissions, so its larger saving is a sensitivity figure, not a proposal.
@@ -162,7 +165,7 @@ submissions, so its larger saving is a sensitivity figure, not a proposal.
 | "roughly 4x more VMs" | **7.2x** (36 vs 5) |
 | 18 structural + 6 engineered features | **22 + 10** |
 | Promotion expands to 2048 MiB Tier 2 | Promotion lifts limits to **uncapped** |
-| Promotion in "under 3 ms" | 248-808 ms, runtime-dependent |
+| Promotion in "under 3 ms" | 236-802 ms, runtime-dependent |
 | "9,332 Tier 1 / 668 promotions" | Not reproducible from any data file |
 | Java verdict `java.lang.OutOfMemoryError` | cgroup `MLE`; that string cannot come from a Java submission |
-| 2.8/2.9/3.1 ms promotions at 128 MiB | 248-808 ms |
+| 2.8/2.9/3.1 ms promotions at 128 MiB | 236-802 ms across 16 promoted runs |

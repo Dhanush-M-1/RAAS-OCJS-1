@@ -4,5 +4,5 @@ Default Per-Pod CPU Reservation,2.0 vCPUs,1.0 vCPU,2.0x reduction in baseline CP
 "Max Pod Packing Density (AWS EC2 c6i.4xlarge, 32 GB)",14 concurrent pods,224 concurrent pods,16.0x higher container density per VM
 VM Fleet Size for 500-Sub Burst,36 VMs (14 slots each),3 VMs (224+ slots each),91.7% reduction in active cloud VMs
 Cluster Hourly Cost (AWS @ USD 0.68/hr),USD 24.48 / hour,USD 2.04 / hour,USD 22.44 / hour savings (91.7% cost cut)
-"Total Contest RAM Reserved (10,000 Subs)",20000.0 GB,9846.88 GB,10153.12 GB reclaimed (50.77% savings)
+"Total Contest RAM Reserved (10,000 Subs)",20000.0 GB,9805.62 GB,10194.38 GB reclaimed (50.97% savings)
 Flash Crowd Response (Scoreboard Freeze),Emergency Autoscaling (Lag: 60-180s),Absorbed in-place by ultra-dense nodes (Lag: 0s),Zero autoscaling lag; zero queue backlogs
