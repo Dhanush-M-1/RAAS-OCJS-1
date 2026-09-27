@@ -121,6 +121,33 @@ cd ../server && cargo build && cd ../model-training
 
 ## 4. Benchmark Performance on Unseen Problems
 
+### Authoritative: thresholds used by the judge
+
+`server/src/predict.rs` compiles against the models exported into
+`server/src/generated/`. The decision thresholds in that file are taken from
+`artifacts/model_comparison.csv`, produced by the most recent training run:
+
+| Model | Test Acc | Test F1 | ROC-AUC | Optimal Threshold |
+|---|---|---|---|---|
+| Unified Multi-Language | 94.45% | 92.03% | 0.9886 | 0.319 |
+| Specialized C++ | 95.45% | 94.27% | 0.9938 | 0.346 |
+| Specialized Java | 82.82% | 81.37% | 0.9380 | 0.257 |
+| Specialized Python | 98.88% | 97.85% | 0.9961 | 0.200 |
+
+A submission is classified Heavy when $P(\text{Heavy}) \ge \tau$.
+
+> **Note on C**: `train_advanced_xgboost.py` trains a C-specialised model, but
+> `regenerate_models.sh` does not export it — only Python, C++, Java, and the
+> unified model are transpiled into `server/src/generated/`. C submissions are
+> therefore scored by the **C++ specialised model** at $\tau = 0.346$.
+
+### Historical runs (superseded)
+
+The tables below record earlier training runs on the two dataset sources. They
+are kept for reference but **do not correspond to the models currently compiled
+into the judge** — see the authoritative table above. A new run overwrites
+`./artifacts/`, so the authoritative numbers are always the most recent.
+
 ### IBM Project CodeNet (71,218 Submissions with Real Hardware Timings)
 | Model Architecture | 5-Fold CV Accuracy | Test Accuracy (Unseen Problems) | F1-Score | Precision | Recall | ROC-AUC | Optimal Threshold |
 |---|---|---|---|---|---|---|---|

@@ -76,6 +76,24 @@ pub struct RunOutcome {
     pub promotion_time_ms: u64,
 }
 
+/// Wall-clock ceiling for a single test case.
+///
+/// Without this, an infinite loop holds its queue semaphore permit forever and
+/// starves every other submission. A case exceeding the limit is killed and
+/// graded `TLE`.
+const CASE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The memory ceiling a case ran under, as reported to the client.
+///
+/// `0` means Uncapped, which is how the frontend renders it.
+fn allocated_for(promoted: bool, tier: Tier) -> u64 {
+    if promoted || tier == Tier::High {
+        0
+    } else {
+        LOW_MEM_HARD_LIMIT
+    }
+}
+
 /// Execute one test case inside the running container and stream its input.
 /// Takes owned arguments so it can run on a `'static` spawned task while the
 /// caller concurrently watches the container's cgroup.
@@ -118,6 +136,14 @@ async fn run_case_monitored(
 ) -> io::Result<CaseResult> {
     let case_start = Instant::now();
     let cpu_start_usec = cg.and_then(|c| c.cpu_usage_usec().ok());
+    // `memory.events` counters are cumulative for the life of the cgroup, so
+    // baseline the OOM counter now and look for an increase at the end of this
+    // case. Without the baseline, an OOM on case 1 would mislabel every later
+    // case in the same submission as MLE.
+    let oom_kill_start = cg
+        .and_then(|c| c.memory_events().ok())
+        .and_then(|e| e.get("oom_kill").copied())
+        .unwrap_or(0);
 
     // Owned copies so the exec task can be spawned with 'static data.
     let mut args = vec!["exec".to_string(), "-i".to_string(), container.to_string()];
@@ -131,9 +157,32 @@ async fn run_case_monitored(
     let mut last_high: Option<u64> = None;
     let mut case_peak: u64 = 0;
     let mut poll = tokio::time::interval(MONITOR_POLL); // first tick fires immediately
+    let deadline = tokio::time::sleep(CASE_TIMEOUT);
+    tokio::pin!(deadline);
 
     let output = loop {
         tokio::select! {
+            // Wall-clock guard. Without this an infinite loop holds its queue
+            // semaphore permit forever and starves every other submission.
+            _ = &mut deadline => {
+                // Kill the submission process inside the container. We cannot
+                // signal the `docker exec` child directly (it is not in the
+                // container's PID namespace), so target the known run commands.
+                let _ = Command::new("docker")
+                    .args(["exec", container, "sh", "-c",
+                        "pkill -9 -f '/app/run' 2>/dev/null; pkill -9 -f 'java' 2>/dev/null; pkill -9 -f 'main.py' 2>/dev/null; exit 0"])
+                    .output()
+                    .await;
+                // Drop the exec task so tokio reaps the `docker exec` child.
+                exec_task.abort();
+                let _ = exec_task.await;
+                return Ok(CaseResult {
+                    verdict: "TLE".to_string(),
+                    cpu_time_ms: case_start.elapsed().as_millis() as u64,
+                    peak_memory_bytes: case_peak,
+                    allocated_memory_bytes: allocated_for(*promoted, *tier),
+                });
+            }
             _ = poll.tick() => {
                 if let Some(cg) = cg {
                     // Reactive trigger: did the kernel cross the soft watermark or memory exceed ~179.2 MiB (70%)?
@@ -244,19 +293,29 @@ async fn run_case_monitored(
         _ => wall_ms,
     };
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let expected = test.expected.trim().to_string();
-    let verdict = if !output.status.success() {
+    let expected = test.expected.trim().trim_end_matches('\r').to_string();
+    // The kernel's `oom_kill` counter is the authoritative signal that this
+    // case actually hit `memory.max` and was killed. A non-zero *increase* over
+    // the baseline means the submission genuinely exceeded the ceiling it was
+    // given: either a non-promoting policy (Baseline/Predictive) ran it
+    // bounded, or a Reactive/Hybrid promotion missed the spike.
+    //
+    // Without this check the kernel kill looks like any other non-zero exit and
+    // is graded `RE`, which is indistinguishable from a segfault.
+    let oom_killed = cg
+        .and_then(|c| c.memory_events().ok())
+        .and_then(|e| e.get("oom_kill").copied())
+        .map_or(false, |n| n > oom_kill_start);
+    let verdict = if oom_killed {
+        "MLE"
+    } else if !output.status.success() {
         "RE"
     } else if stdout == expected {
         "AC"
     } else {
         "WA"
     };
-    let allocated = if *promoted || *tier == Tier::High {
-        0
-    } else {
-        LOW_MEM_HARD_LIMIT
-    };
+    let allocated = allocated_for(*promoted, *tier);
     Ok(CaseResult {
         verdict: verdict.to_string(),
         cpu_time_ms: cpu_ms,

@@ -198,6 +198,24 @@ curl -X POST localhost:3000/submit -H 'content-type: application/json' -d '{
 | `cpu_time_ms` | sum of per-case CPU time measured via cgroup v2 CFS `cpu.stat` delta |
 | `wall_time_ms` | total elapsed wall-clock time from request receipt to completion |
 
+### Verdicts
+
+| Verdict | Emitted when |
+|---|---|
+| `AC` | every case's stdout matched the expected output |
+| `WA` | the program ran and exited 0, but stdout differed |
+| `TLE` | a case exceeded the **10 s** wall-clock limit (`CASE_TIMEOUT` in `docker.rs`); the process is killed inside the container |
+| `MLE` | the kernel's `oom_kill` counter in `memory.events` rose during the case — the submission hit `memory.max` and was killed |
+| `RE` | the program exited non-zero for any other reason (segfault, uncaught exception, compile failure) |
+| `SE` | the judge itself failed (Docker unavailable, container start error) |
+
+`TLE` and `MLE` are both read from ground truth rather than inferred: `TLE` from
+a wall-clock guard, `MLE` from the kernel's monotonic `oom_kill` counter (which
+is baselined per test case, so an OOM on case 1 does not mislabel case 2). A
+Light-tier submission that exceeds 256 MiB is graded `MLE` under Baseline and
+Predictive; under Reactive and Hybrid the monitor normally promotes it first, so
+`MLE` there means the promotion missed the spike.
+
 > `peak_memory_bytes` / `allocated_memory_bytes` / `cpu_time_ms` are measured directly from the host cgroup controllers (`cpu.stat`, `memory.current`, `memory.events`), providing microsecond precision free of Docker process startup jitter.
 
 ---

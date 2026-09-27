@@ -38,11 +38,17 @@ RAAS-OCJS evaluates four distinct scheduling paradigms against a common containe
   2. Feature extractor scans the AST in a single pass to compute 22 structural metrics and 10 engineered density ratios.
   3. Pre-compiled XGBoost inference function (`score(features)`) outputs a probability score $P(\text{Heavy})$.
   4. If $P(\text{Heavy}) \ge \tau_{\text{lang}}$, assign `Tier::High`; otherwise, assign `Tier::Low`.
-- **Thresholds**:
+- **Thresholds** (from `model-training/artifacts/model_comparison.csv`):
   - Python: $\tau = 0.200$
   - Java: $\tau = 0.257$
   - C++: $\tau = 0.346$
   - C: $\tau = 0.346$
+- **Model Selection**: Python, Java, and C++ use their specialised models. **C is
+  also scored by the C++ specialised model** — `regenerate_models.sh` transpiles
+  only the Python, C++, Java, and unified models into `server/src/generated/`,
+  so no C weights exist in the judge binary. The C and C++ Tree-sitter grammars
+  emit near-identical node types for these features, so the C++ weights transfer
+  without the feature vector changing shape.
 - **Resource Limits**:
   - If Light: `memory = 256m`, `cpus = 1.0`
   - If Heavy: `memory = uncapped`, `cpus = uncapped`

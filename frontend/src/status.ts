@@ -2,8 +2,9 @@ export type Tone = 'success' | 'danger' | 'warning' | 'heavy' | 'muted'
 
 /**
  * Verdict code -> semantic tone.
- * Backend currently emits AC / WA / RE / SE; TLE / MLE / CE are mapped so the
- * status-color language stays complete and future-proof.
+ * The backend emits AC / WA / TLE / MLE / RE / SE; `TLE` comes from a
+ * per-case wall-clock guard and `MLE` from the kernel's `oom_kill` counter.
+ * `CE` is mapped so the status-color language stays complete.
  */
 export function verdictTone(verdict: string): Tone {
   switch (verdict) {
