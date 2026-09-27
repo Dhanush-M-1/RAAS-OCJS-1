@@ -46,6 +46,9 @@ HEALTH_ENDPOINT = f"{SERVER_URL}/health"
 # against; it is a comparison convention, not a judge setting.
 # ---------------------------------------------------------------------------
 LIGHT_TIER_MB = int(os.environ.get("LIGHT_TIER_MB", "256"))
+# The simulations are stochastic; seed them so a reported figure can be
+# reproduced exactly rather than re-drawn on each invocation.
+SEED = int(os.environ.get("BENCH_SEED", "42"))
 BASELINE_TIER_MB = 2048
 # A promoted container is lifted to *uncapped* by `docker update --memory 0`,
 # not to a 2048 MiB tier. For a reservation model we charge a promoted
@@ -454,6 +457,28 @@ int main() {
     print(f"[DATASET] Successfully prepared corpus of {len(corpus)} real-world benchmark programs across 4 languages.")
     return corpus
 
+def alloc_for(tier_started, tier_promoted):
+    """Memory/CPU charged for one submission, from the judge's OWN decision.
+
+    Must not be derived from the corpus's `is_heavy` label. That label is
+    ground truth, so using it models an oracle classifier rather than the
+    one under test, and it disagrees with the judge's real decision often
+    enough to change the totals materially (20 of 72 cells, both directions).
+    The judge reports tier_started and tier_promoted per submission; charge
+    from those.
+
+    `tier_started` is "low" for the 256 MiB tier and anything else for the
+    fixed baseline ceiling. A promotion is charged the baseline ceiling as a
+    conservative upper bound: the shipped judge lifts the limit to uncapped,
+    which has no finite reservation to account against.
+    """
+    if tier_promoted:
+        return float(PROMOTED_TIER_MB), 2.0, 2048
+    if tier_started == "low":
+        return float(LIGHT_TIER_MB), 1.0, 1024
+    return float(BASELINE_TIER_MB), 2.0, 2048
+
+
 def run_empirical_evaluations(corpus):
     """
     Executes each benchmark program across all 4 strategies against the live judge server.
@@ -502,16 +527,8 @@ def run_empirical_evaluations(corpus):
                     used_mb = peak_bytes / (1024.0 * 1024.0)
                     
                     # Compute allocated memory based on tier
-                    heavy_start = strat == "baseline" or (strat == "predictive" and is_heavy)
-                    promoted = strat in ("reactive", "hybrid") and tier_promoted
-                    if heavy_start or promoted or (strat == "hybrid" and is_heavy):
-                        alloc_mb = float(BASELINE_TIER_MB if not promoted else PROMOTED_TIER_MB)
-                        alloc_cores = 2.0
-                        cpu_shares = 2048
-                    else:
-                        alloc_mb = float(LIGHT_TIER_MB)
-                        alloc_cores = 1.0
-                        cpu_shares = 1024
+                    alloc_mb, alloc_cores, cpu_shares = alloc_for(
+                        tier_started, tier_promoted)
                             
                     wasted_mb = max(0.0, alloc_mb - used_mb)
                     wasted_pct = (wasted_mb / alloc_mb) * 100.0
@@ -530,6 +547,7 @@ def run_empirical_evaluations(corpus):
                         "wasted_pct": round(wasted_pct, 2),
                         "allocated_cpu_cores": alloc_cores,
                         "cpu_shares": cpu_shares,
+                        "tier_started": tier_started,
                         "cpu_time_ms": cpu_ms,
                         "container_wall_ms": wall_ms,
                         "e2e_request_to_verdict_ms": round(t_e2e_ms, 2),
@@ -562,6 +580,7 @@ def run_macro_contest_simulation(empirical_runs):
     using empirical kernel performance profiles from real CodeNet/CodeContests runs.
     Calculates queue wait times, turnaround times, and total memory/CPU allocations.
     """
+    random.seed(SEED)
     print("\n=== RUNNING 10,000-SUBMISSION CONTEST SIMULATION BASED ON EMPIRICAL PROFILES ===")
     N_SUBS = 10000
     CONTEST_SECS = 7200.0  # 2 Hours
@@ -664,7 +683,8 @@ def dispatch_sim(sub, start_time, wait_ms, strat, prof_dict, events, completed):
     e2e_ms = prof["e2e_request_to_verdict_ms"] * jitter
     cpu_ms = prof["cpu_time_ms"] * jitter
     used_mb = prof["used_mb"] * jitter
-    alloc_mb = prof["allocated_mb"]
+    alloc_mb, _cores, _shares = alloc_for(
+        prof.get("tier_started", "low"), prof.get("tier_promoted", False))
     wasted_mb = max(0.0, alloc_mb - used_mb)
     wasted_pct = (wasted_mb / alloc_mb) * 100.0
     
@@ -686,7 +706,7 @@ def dispatch_sim(sub, start_time, wait_ms, strat, prof_dict, events, completed):
         "used_mb": round(used_mb, 2),
         "wasted_mb": round(wasted_mb, 2),
         "wasted_pct": round(wasted_pct, 2),
-        "allocated_cpu_cores": prof["allocated_cpu_cores"],
+        "allocated_cpu_cores": _cores,
         "tier_promoted": prof["tier_promoted"]
     }
     completed.append(rec)
@@ -876,6 +896,7 @@ def run_burst_stress(empirical_runs):
     Evaluates queue wait, E2E turnaround, and drain times with the deployed
     {LIGHT_TIER_MB} MB Low tier.
     """
+    random.seed(SEED)
     print("\n=== HIGH-INTENSITY CONTEST FREEZE BURST SIMULATION (N=500, 30s) ===")
     N_BURST = 500
     BURST_WINDOW = 30.0
