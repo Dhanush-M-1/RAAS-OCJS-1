@@ -108,18 +108,28 @@ The system includes five high-stakes competition problems modeled after **Codefo
 
 ## 06. Experimental Results
 
-*Measured on Linux Kernel 6.x with cgroup v2 (Python 3.12 / GCC 13):*
+*Measured live on Linux kernel 6.x with cgroup v2, over the full 5 problems × 4 languages × 4 strategies matrix (80 runs). All 80 returned `AC`.*
 
-| Problem | Strategy | Verdict | Initial Tier | Tier Promoted? | CPU Time (`cpu.stat`) | Peak Memory (Used) | Allocated Memory (Limit) |
+| Problem | Strategy | Verdict | Initial Tier | Promoted? | CPU (`cpu.stat`) | Peak RSS | Allocated |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **P1: Prefix Sums** | Baseline | **AC** | Heavy | No | 77 ms | 14.1 MB | Uncapped (Host) |
-| | **Predictive / Reactive** | **AC** | Light | No | **48–52 ms** | **8.2 MB** | **256 MiB** |
-| **P2: Knapsack 2D DP** | Baseline | **AC** | Heavy | No | 210 ms | 201.2 MB | Uncapped (Host) |
-| | **Reactive / Hybrid** | **AC** | Light | **Yes (538 ms)** | **215 ms** | **201.2 MB** | **256 MB $\rightarrow$ Uncapped** |
-| **P3: Floyd-Warshall** | Baseline | **AC** | Heavy | No | 580 ms | 9.9 MB | Uncapped (Host) |
-| | **Predictive** | **AC** | Light | No | **573 ms** | **9.8 MB** | **256 MiB** |
-| **P5: Top-K Streaming** | Baseline | **AC** | Heavy | No | 163 ms | 21.1 MB | Uncapped (Host) |
-| | **Predictive / Hybrid** | **AC** | Light | No | **135–144 ms** | **10.9 MB** | **256 MiB** |
+| **P1: Prefix Sums** (Python) | Baseline | **AC** | Heavy | No | 68 ms | 8.4 MB | Uncapped |
+| | Predictive / Reactive / Hybrid | **AC** | Light | No | 73–77 ms | 8.3–9.1 MB | **256 MiB** |
+| **P2: Knapsack Buffer** (Java) | Baseline | **AC** | Heavy | No | 486 ms | 195.6 MB | Uncapped |
+| | Predictive | **AC** | Light | No | 495 ms | 190.2 MB | 256 MiB |
+| | **Reactive** | **AC** | Light | **Yes (1444 ms)** | 459 ms | 191.1 MB | 256 MiB → Uncapped |
+| | **Hybrid** | **AC** | Light | **Yes (1361 ms)** | 447 ms | 191.3 MB | 256 MiB → Uncapped |
+| **P3: Floyd-Warshall** (Python) | Baseline | **AC** | Heavy | No | 663 ms | 10.1 MB | Uncapped |
+| | Predictive / Reactive / Hybrid | **AC** | Light | No | 571–616 ms | 7.8–9.2 MB | **256 MiB** |
+| **P4: Tree Search** (C++) | Baseline | **AC** | Heavy | No | 84 ms | 42.9 MB | Uncapped |
+| | Predictive / Reactive / Hybrid | **AC** | Light | No | 67–72 ms | 6.2–6.7 MB | **256 MiB** |
+| **P5: Top-K Streaming** (C++) | Baseline | **AC** | Heavy | No | 57 ms | 51.3 MB | Uncapped |
+| | Predictive / Reactive / Hybrid | **AC** | Light | No | 55–61 ms | 6.5–9.5 MB | **256 MiB** |
+
+**Aggregate across all 80 runs:** mean CPU is flat across strategies (210.6–216.2 ms, spread ≈2.7%) — tiering carries no measurable CPU cost. **52 of 80 runs (65%) were held at a hard 256 MiB ceiling**; the rest were Baseline or promoted mid-run. Live promotion fired in **8 of 8** eligible P2 runs and **0** Predictive runs.
+
+> **Watermark note.** This matrix was measured with the soft watermark at **128 MiB** (50% of the 256 MiB tier). The watermark is now configurable via `HIGH_WATERMARK_PCT` in `server/src/docker.rs` and defaults to 70% (~179.2 MiB). Peak-RSS and promotion-timing figures above were taken at the lower setting; the tiering verdicts and CPU measurements are unaffected, but promotion latency will shift with a higher watermark. Re-measure before citing these numbers against a 70% configuration.
+
+Full per-language matrix, promotion traces, and threats to validity: [`docs/EXPERIMENTAL_RESULTS.md`](docs/EXPERIMENTAL_RESULTS.md).
 
 ---
 
