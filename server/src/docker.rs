@@ -133,10 +133,25 @@ fn get_tier_limits(tier: &Tier) -> Vec<String> {
     match tier {
         // Low starts bounded (1 CPU / 256 MiB). `Tier::High` is unlimited today,
         // which is also the ceiling Reactive/Hybrid promote to (see moderator.rs).
-        Tier::Low => vec![
-            "--cpus=1".to_string(),
-            format!("--memory={}m", low_mem_hard_limit() / (1024 * 1024)),
-        ],
+        //
+        // `--memory-swap` must be given explicitly. When `--memory` is set and
+        // `--memory-swap` is omitted, Docker defaults the swap limit to the same
+        // value as `--memory`, so the container may draw up to *twice* its
+        // nominal size, half from RAM and half from swap. A container configured
+        // for 128 MiB then completed with a 235 MB working set (measured: the
+        // effective ceiling sits near 240 MB, not 128 MB), which silently
+        // defeats the tier and inflates every peak reported for a capped run.
+        //
+        // Passing swap equal to memory leaves no swap allowance, so the limit
+        // bounds resident memory instead of RAM plus swap.
+        Tier::Low => {
+            let mb = low_mem_hard_limit() / (1024 * 1024);
+            vec![
+                "--cpus=1".to_string(),
+                format!("--memory={mb}m"),
+                format!("--memory-swap={mb}m"),
+            ]
+        }
         _ => vec![],
     }
 }
