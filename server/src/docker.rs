@@ -49,8 +49,53 @@ fn source_filename(language: &str) -> &'static str {
     }
 }
 
+/// Docker container names must match `[a-zA-Z0-9][a-zA-Z0-9_.-]*`. A submission
+/// id is client-supplied and may contain anything (e.g. `C++`, or a path
+/// separator), which previously produced an invalid container name and an
+/// opaque `SE` verdict. Map every disallowed byte to `_`, then collapse runs
+/// of `_` so distinct ids stay distinct. The returned value always begins with
+/// an alphanumeric character.
+fn sanitize_id(id: &str) -> String {
+    let mut out = String::with_capacity(id.len());
+    for ch in id.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '-' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    // Collapse consecutive separators introduced above.
+    let mut collapsed = String::with_capacity(out.len());
+    let mut prev_us = false;
+    for ch in out.chars() {
+        if ch == '_' && prev_us {
+            continue;
+        }
+        prev_us = ch == '_';
+        collapsed.push(ch);
+    }
+    // The first character must be alphanumeric, not `_`, `.` or `-`. Strip any
+    // run of those, and fall back to a fixed name if nothing usable remains.
+    let trimmed = collapsed.trim_start_matches(['_', '.', '-']);
+    if trimmed.is_empty() {
+        return "submission".to_string();
+    }
+    // If we rewrote anything, append a short hash of the original id. Two
+    // different ids can sanitise to the same string (`x/y` and `x_y` both
+    // become `x_y`), and colliding container names would let one submission's
+    // `docker rm -f` tear down another's running container.
+    if trimmed != id {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        id.hash(&mut h);
+        return format!("{}_{:08x}", trimmed, h.finish() as u32);
+    }
+    trimmed.to_string()
+}
+
 fn write_source(submission: &Submission) -> std::io::Result<std::path::PathBuf> {
-    let dir = std::env::temp_dir().join(format!("oj_{}", submission.id));
+    let dir = std::env::temp_dir().join(format!("oj_{}", sanitize_id(&submission.id)));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir(&dir)?;
     std::fs::write(
@@ -425,7 +470,7 @@ async fn start_and_compile(
     tier: &Tier,
 ) -> std::io::Result<(String, Vec<String>)> {
     let image = image_for(language);
-    let cname = format!("oj_{}", submission_id);
+    let cname = format!("oj_{}", sanitize_id(submission_id));
 
     let _ = Command::new("docker")
         .args(["rm", "-f", &cname])
@@ -510,4 +555,99 @@ async fn start_and_compile(
     }
 
     Ok((cname.clone(), run_cmd))
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::sanitize_id;
+
+    /// Docker requires `[a-zA-Z0-9][a-zA-Z0-9_.-]*`. Anything else makes the
+    /// container name invalid and the submission fails with an opaque `SE`.
+    fn assert_valid(id: &str) -> String {
+        let s = sanitize_id(id);
+        let mut chars = s.chars();
+        let first = chars.next().expect("sanitized id is never empty");
+        assert!(
+            first.is_ascii_alphanumeric(),
+            "id {id:?} -> {s:?} must start with an alphanumeric character"
+        );
+        for c in s.chars() {
+            assert!(
+                c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-',
+                "id {id:?} -> {s:?} contains illegal character {c:?}"
+            );
+        }
+        s
+    }
+
+    #[test]
+    fn plain_ids_pass_through_unchanged() {
+        for id in ["sub-1", "sub_42", "bench_P4_trips_bfs_cpp_baseline", "a.b-c_d"] {
+            assert_eq!(assert_valid(id), id, "already-valid id must be preserved");
+        }
+    }
+
+    /// Rewritten ids get a `<name>_<hash8>` suffix; only the stem is stable.
+    fn stem(id: &str) -> String {
+        let s = assert_valid(id);
+        match s.rsplit_once('_') {
+            Some((head, tail)) if tail.len() == 8 && tail.chars().all(|c| c.is_ascii_hexdigit()) => {
+                head.to_string()
+            }
+            _ => s,
+        }
+    }
+
+    #[test]
+    fn plus_sign_from_language_names_is_neutralised() {
+        // `C++` is a real language label and was the original trigger: it
+        // produced the invalid container name `oj_cvC++` and an opaque `SE`.
+        for id in ["oj_cvC++", "C++", "cpp_C++_v2"] {
+            let s = assert_valid(id);
+            assert!(!s.contains('+'), "id {id:?} -> {s:?} still contains '+'");
+            assert!(!s.starts_with(['_', '.', '-']), "{s:?} starts with a separator");
+        }
+        // The exact stem is cosmetic; the contract is validity and stability.
+        assert_eq!(assert_valid("oj_cvC++"), assert_valid("oj_cvC++"));
+    }
+
+    #[test]
+    fn path_separators_and_spaces_cannot_escape_the_temp_dir() {
+        assert_eq!(stem("sl/ash"), "sl_ash");
+        assert_eq!(stem("sp ace"), "sp_ace");
+        // The traversal components are destroyed, so the result cannot escape
+        // the temp dir even before the prefix is applied.
+        assert_eq!(stem("../../etc/passwd"), "etc_passwd");
+        assert!(!sanitize_id("../../etc/passwd").contains(".."));
+    }
+
+    #[test]
+    fn leading_separators_are_stripped() {
+        assert_eq!(stem(".hidden"), "hidden");
+        assert_eq!(stem("--flag"), "flag");
+    }
+
+    #[test]
+    fn runs_of_illegal_bytes_collapse() {
+        assert_eq!(stem("a   b"), "a_b");
+        assert_eq!(stem("a++b"), "a_b");
+    }
+
+    #[test]
+    fn empty_and_all_illegal_ids_still_produce_a_valid_name() {
+        assert_eq!(assert_valid(""), "submission");
+        assert_eq!(assert_valid("///"), "submission");
+        assert_eq!(assert_valid("..."), "submission");
+    }
+
+    #[test]
+    fn distinct_ids_do_not_collide() {
+        // Collapsing must not merge ids that differ only in illegal bytes:
+        // a collision would let one submission's `docker rm -f` tear down
+        // another submission's running container.
+        assert_ne!(assert_valid("x/y"), assert_valid("x_y"));
+        assert_ne!(assert_valid("a+b"), assert_valid("a b"));
+        // ...and the suffix must be stable, not random per call.
+        assert_eq!(assert_valid("x/y"), assert_valid("x/y"));
+    }
 }
