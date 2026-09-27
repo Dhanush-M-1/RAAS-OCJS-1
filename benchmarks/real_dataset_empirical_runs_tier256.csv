@@ -1,73 +1,73 @@
 submission_id,problem_id,problem_name,category,language,strategy,verdict,allocated_mb,used_mb,wasted_mb,wasted_pct,allocated_cpu_cores,cpu_shares,tier_started,cpu_time_ms,container_wall_ms,e2e_request_to_verdict_ms,tier_promoted,promotion_time_ms
-bench_P4_trips_bfs_cpp_baseline,P4_trips_bfs,1037_E. Trips,Graph Traversal,CPP,Baseline,AC,2048.0,6.39,2041.61,99.69,2.0,2048,high,17,1219,1224.23,False,0
-bench_P4_trips_bfs_cpp_predictive,P4_trips_bfs,1037_E. Trips,Graph Traversal,CPP,Predictive,AC,2048.0,6.73,2041.27,99.67,2.0,2048,high,17,1218,1226.24,False,0
-bench_P4_trips_bfs_cpp_reactive,P4_trips_bfs,1037_E. Trips,Graph Traversal,CPP,Reactive,AC,256.0,6.33,249.67,97.53,1.0,1024,low,17,1222,1228.44,False,0
-bench_P4_trips_bfs_cpp_hybrid,P4_trips_bfs,1037_E. Trips,Graph Traversal,CPP,Hybrid,AC,2048.0,6.63,2041.37,99.68,2.0,2048,high,17,1237,1246.34,False,0
-bench_P4_trips_bfs_java_baseline,P4_trips_bfs,1037_E. Trips,Graph Traversal,JAVA,Baseline,AC,2048.0,24.63,2023.37,98.8,2.0,2048,high,39,649,786.35,False,0
-bench_P4_trips_bfs_java_predictive,P4_trips_bfs,1037_E. Trips,Graph Traversal,JAVA,Predictive,AC,2048.0,23.74,2024.26,98.84,2.0,2048,high,41,640,649.74,False,0
-bench_P4_trips_bfs_java_reactive,P4_trips_bfs,1037_E. Trips,Graph Traversal,JAVA,Reactive,AC,256.0,21.15,234.85,91.74,1.0,1024,low,52,893,912.71,False,0
-bench_P4_trips_bfs_java_hybrid,P4_trips_bfs,1037_E. Trips,Graph Traversal,JAVA,Hybrid,AC,2048.0,22.76,2025.24,98.89,2.0,2048,high,40,633,640.79,False,0
-bench_P4_trips_bfs_python_baseline,P4_trips_bfs,1037_E. Trips,Graph Traversal,PYTHON,Baseline,AC,2048.0,11.05,2036.95,99.46,2.0,2048,high,38,264,268.26,False,0
-bench_P4_trips_bfs_python_predictive,P4_trips_bfs,1037_E. Trips,Graph Traversal,PYTHON,Predictive,AC,2048.0,13.44,2034.56,99.34,2.0,2048,high,36,258,267.33,False,0
-bench_P4_trips_bfs_python_reactive,P4_trips_bfs,1037_E. Trips,Graph Traversal,PYTHON,Reactive,AC,256.0,12.94,243.06,94.95,1.0,1024,low,36,265,272.62,False,0
-bench_P4_trips_bfs_python_hybrid,P4_trips_bfs,1037_E. Trips,Graph Traversal,PYTHON,Hybrid,AC,2048.0,12.72,2035.28,99.38,2.0,2048,high,38,256,264.42,False,0
-bench_P1_phone_numbers_python_baseline,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,PYTHON,Baseline,AC,2048.0,10.33,2037.67,99.5,2.0,2048,high,25,243,249.85,False,0
-bench_P1_phone_numbers_python_predictive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,PYTHON,Predictive,AC,256.0,8.83,247.17,96.55,1.0,1024,low,29,262,269.04,False,0
-bench_P1_phone_numbers_python_reactive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,PYTHON,Reactive,AC,256.0,9.75,246.25,96.19,1.0,1024,low,26,254,263.09,False,0
-bench_P1_phone_numbers_python_hybrid,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,PYTHON,Hybrid,AC,256.0,9.82,246.18,96.17,1.0,1024,low,27,251,257.0,False,0
-bench_P1_phone_numbers_cpp_baseline,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,CPP,Baseline,AC,2048.0,7.03,2040.97,99.66,2.0,2048,high,17,1082,1088.25,False,0
-bench_P1_phone_numbers_cpp_predictive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,CPP,Predictive,AC,256.0,6.21,249.79,97.57,1.0,1024,low,18,1039,1045.67,False,0
-bench_P1_phone_numbers_cpp_reactive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,CPP,Reactive,AC,256.0,6.75,249.25,97.36,1.0,1024,low,17,1032,1038.41,False,0
-bench_P1_phone_numbers_cpp_hybrid,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,CPP,Hybrid,AC,256.0,6.48,249.52,97.47,1.0,1024,low,17,1044,1050.9,False,0
-bench_P1_phone_numbers_java_baseline,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,JAVA,Baseline,AC,2048.0,24.28,2023.72,98.81,2.0,2048,high,62,596,600.03,False,0
-bench_P1_phone_numbers_java_predictive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,JAVA,Predictive,AC,2048.0,24.23,2023.77,98.82,2.0,2048,high,60,584,591.14,False,0
-bench_P1_phone_numbers_java_reactive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,JAVA,Reactive,AC,256.0,20.49,235.51,92.0,1.0,1024,low,68,791,798.59,False,0
-bench_P1_phone_numbers_java_hybrid,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,JAVA,Hybrid,AC,2048.0,24.41,2023.59,98.81,2.0,2048,high,62,615,621.96,False,0
-bench_P2_min_integer_python_baseline,P2_min_integer,1101_A. Minimum Integer,Number Theory,PYTHON,Baseline,AC,2048.0,10.15,2037.85,99.5,2.0,2048,high,28,247,253.79,False,0
-bench_P2_min_integer_python_predictive,P2_min_integer,1101_A. Minimum Integer,Number Theory,PYTHON,Predictive,AC,256.0,9.97,246.03,96.1,1.0,1024,low,29,250,257.8,False,0
-bench_P2_min_integer_python_reactive,P2_min_integer,1101_A. Minimum Integer,Number Theory,PYTHON,Reactive,AC,256.0,9.58,246.42,96.26,1.0,1024,low,25,243,250.18,False,0
-bench_P2_min_integer_python_hybrid,P2_min_integer,1101_A. Minimum Integer,Number Theory,PYTHON,Hybrid,AC,256.0,9.91,246.09,96.13,1.0,1024,low,27,251,257.65,False,0
-bench_P2_min_integer_java_baseline,P2_min_integer,1101_A. Minimum Integer,Number Theory,JAVA,Baseline,AC,2048.0,22.3,2025.7,98.91,2.0,2048,high,38,581,587.64,False,0
-bench_P2_min_integer_java_predictive,P2_min_integer,1101_A. Minimum Integer,Number Theory,JAVA,Predictive,AC,2048.0,20.41,2027.59,99.0,2.0,2048,high,38,594,602.92,False,0
-bench_P2_min_integer_java_reactive,P2_min_integer,1101_A. Minimum Integer,Number Theory,JAVA,Reactive,AC,256.0,19.3,236.7,92.46,1.0,1024,low,46,805,809.87,False,0
-bench_P2_min_integer_java_hybrid,P2_min_integer,1101_A. Minimum Integer,Number Theory,JAVA,Hybrid,AC,2048.0,24.64,2023.36,98.8,2.0,2048,high,36,588,595.49,False,0
-bench_P2_min_integer_cpp_baseline,P2_min_integer,1101_A. Minimum Integer,Number Theory,CPP,Baseline,AC,2048.0,6.23,2041.77,99.7,2.0,2048,high,17,1031,1035.32,False,0
-bench_P2_min_integer_cpp_predictive,P2_min_integer,1101_A. Minimum Integer,Number Theory,CPP,Predictive,AC,256.0,6.19,249.81,97.58,1.0,1024,low,16,1040,1046.52,False,0
-bench_P2_min_integer_cpp_reactive,P2_min_integer,1101_A. Minimum Integer,Number Theory,CPP,Reactive,AC,256.0,6.29,249.71,97.54,1.0,1024,low,17,1038,1043.3,False,0
-bench_P2_min_integer_cpp_hybrid,P2_min_integer,1101_A. Minimum Integer,Number Theory,CPP,Hybrid,AC,256.0,5.95,250.05,97.68,1.0,1024,low,17,1038,1045.29,False,0
-bench_P3_tree_degree_python_baseline,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,PYTHON,Baseline,AC,2048.0,10.1,2037.9,99.51,2.0,2048,high,26,241,247.27,False,0
-bench_P3_tree_degree_python_predictive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,PYTHON,Predictive,AC,256.0,10.2,245.8,96.01,1.0,1024,low,29,238,245.2,False,0
-bench_P3_tree_degree_python_reactive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,PYTHON,Reactive,AC,256.0,8.84,247.16,96.55,1.0,1024,low,26,236,241.06,False,0
-bench_P3_tree_degree_python_hybrid,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,PYTHON,Hybrid,AC,256.0,9.77,246.23,96.18,1.0,1024,low,27,241,246.29,False,0
-bench_P3_tree_degree_java_baseline,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,JAVA,Baseline,AC,2048.0,23.14,2024.86,98.87,2.0,2048,high,36,601,607.74,False,0
-bench_P3_tree_degree_java_predictive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,JAVA,Predictive,AC,2048.0,25.17,2022.83,98.77,2.0,2048,high,38,610,619.14,False,0
-bench_P3_tree_degree_java_reactive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,JAVA,Reactive,AC,256.0,22.0,234.0,91.41,1.0,1024,low,46,849,854.54,False,0
-bench_P3_tree_degree_java_hybrid,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,JAVA,Hybrid,AC,2048.0,24.95,2023.05,98.78,2.0,2048,high,39,607,616.89,False,0
-bench_P3_tree_degree_cpp_baseline,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,CPP,Baseline,AC,2048.0,6.23,2041.77,99.7,2.0,2048,high,18,1147,1154.91,False,0
-bench_P3_tree_degree_cpp_predictive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,CPP,Predictive,AC,2048.0,6.37,2041.63,99.69,2.0,2048,high,19,1134,1146.31,False,0
-bench_P3_tree_degree_cpp_reactive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,CPP,Reactive,AC,256.0,6.4,249.6,97.5,1.0,1024,low,19,1121,1128.21,False,0
-bench_P3_tree_degree_cpp_hybrid,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,CPP,Hybrid,AC,2048.0,6.02,2041.98,99.71,2.0,2048,high,17,1128,1138.51,False,0
-bench_P1_prefix_sums_c_baseline,P1_prefix_sums,Prefix Sums (Light C),Data Structures,C,Baseline,AC,2048.0,53.58,1994.42,97.38,2.0,2048,high,23,338,347.94,False,0
-bench_P1_prefix_sums_c_predictive,P1_prefix_sums,Prefix Sums (Light C),Data Structures,C,Predictive,AC,2048.0,21.26,2026.74,98.96,2.0,2048,high,22,295,302.89,False,0
-bench_P1_prefix_sums_c_reactive,P1_prefix_sums,Prefix Sums (Light C),Data Structures,C,Reactive,AC,256.0,18.07,237.93,92.94,1.0,1024,low,22,290,294.39,False,0
-bench_P1_prefix_sums_c_hybrid,P1_prefix_sums,Prefix Sums (Light C),Data Structures,C,Hybrid,AC,2048.0,20.27,2027.73,99.01,2.0,2048,high,22,296,304.4,False,0
-bench_P3_floyd_warshall_c_baseline,P3_floyd_warshall,Floyd-Warshall (CPU C),Graph Algorithms,C,Baseline,AC,2048.0,6.68,2041.32,99.67,2.0,2048,high,60,342,347.31,False,0
-bench_P3_floyd_warshall_c_predictive,P3_floyd_warshall,Floyd-Warshall (CPU C),Graph Algorithms,C,Predictive,AC,256.0,6.4,249.6,97.5,1.0,1024,low,60,352,358.95,False,0
-bench_P3_floyd_warshall_c_reactive,P3_floyd_warshall,Floyd-Warshall (CPU C),Graph Algorithms,C,Reactive,AC,256.0,6.35,249.65,97.52,1.0,1024,low,62,345,350.72,False,0
-bench_P3_floyd_warshall_c_hybrid,P3_floyd_warshall,Floyd-Warshall (CPU C),Graph Algorithms,C,Hybrid,AC,256.0,6.79,249.21,97.35,1.0,1024,low,58,335,342.33,False,0
-bench_P5_knapsack_2d_dp_cpp_baseline,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,CPP,Baseline,AC,2048.0,202.78,1845.22,90.1,2.0,2048,high,183,634,638.25,False,0
-bench_P5_knapsack_2d_dp_cpp_predictive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,CPP,Predictive,AC,256.0,204.59,51.41,20.08,1.0,1024,low,188,640,649.22,False,0
-bench_P5_knapsack_2d_dp_cpp_reactive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,CPP,Reactive,AC,2048.0,203.72,1844.28,90.05,2.0,2048,low,191,623,629.17,True,558
-bench_P5_knapsack_2d_dp_cpp_hybrid,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,CPP,Hybrid,AC,2048.0,204.3,1843.7,90.02,2.0,2048,low,195,641,648.59,True,579
-bench_P5_knapsack_2d_dp_python_baseline,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,PYTHON,Baseline,AC,2048.0,221.43,1826.57,89.19,2.0,2048,high,98,334,359.21,False,0
-bench_P5_knapsack_2d_dp_python_predictive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,PYTHON,Predictive,AC,256.0,221.52,34.48,13.47,1.0,1024,low,99,335,341.53,False,0
-bench_P5_knapsack_2d_dp_python_reactive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,PYTHON,Reactive,AC,2048.0,220.58,1827.42,89.23,2.0,2048,low,115,333,341.1,True,259
-bench_P5_knapsack_2d_dp_python_hybrid,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,PYTHON,Hybrid,AC,2048.0,220.45,1827.55,89.24,2.0,2048,low,116,342,346.67,True,274
-bench_P5_knapsack_2d_dp_java_baseline,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,JAVA,Baseline,AC,2048.0,253.57,1794.43,87.62,2.0,2048,high,247,684,690.26,False,0
-bench_P5_knapsack_2d_dp_java_predictive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,JAVA,Predictive,AC,256.0,256.07,0.0,0.0,1.0,1024,low,307,1014,1019.56,False,0
-bench_P5_knapsack_2d_dp_java_reactive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,JAVA,Reactive,AC,2048.0,256.0,1792.0,87.5,2.0,2048,low,317,1040,1045.72,True,776
-bench_P5_knapsack_2d_dp_java_hybrid,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,JAVA,Hybrid,AC,2048.0,256.0,1792.0,87.5,2.0,2048,low,367,1198,1205.45,True,802
-bench_P5_knapsack_2d_dp_c_baseline,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,C,Baseline,AC,2048.0,201.66,1846.34,90.15,2.0,2048,high,72,368,374.48,False,0
-bench_P5_knapsack_2d_dp_c_predictive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,C,Predictive,AC,256.0,204.98,51.02,19.93,1.0,1024,low,69,363,370.03,False,0
-bench_P5_knapsack_2d_dp_c_reactive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,C,Reactive,AC,2048.0,176.93,1871.07,91.36,2.0,2048,low,74,357,367.35,True,301
-bench_P5_knapsack_2d_dp_c_hybrid,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,C,Hybrid,AC,2048.0,170.91,1877.09,91.65,2.0,2048,low,68,350,358.42,True,290
+bench_P4_trips_bfs_cpp_baseline,P4_trips_bfs,1037_E. Trips,Graph Traversal,CPP,Baseline,AC,2048.0,6.5,2041.5,99.68,2.0,2048,high,16,1156,1163.14,False,0
+bench_P4_trips_bfs_cpp_predictive,P4_trips_bfs,1037_E. Trips,Graph Traversal,CPP,Predictive,AC,2048.0,6.61,2041.39,99.68,2.0,2048,high,17,1165,1175.16,False,0
+bench_P4_trips_bfs_cpp_reactive,P4_trips_bfs,1037_E. Trips,Graph Traversal,CPP,Reactive,AC,256.0,6.49,249.51,97.46,1.0,1024,low,19,1148,1156.6,False,0
+bench_P4_trips_bfs_cpp_hybrid,P4_trips_bfs,1037_E. Trips,Graph Traversal,CPP,Hybrid,AC,2048.0,6.73,2041.27,99.67,2.0,2048,high,19,1178,1187.29,False,0
+bench_P4_trips_bfs_java_baseline,P4_trips_bfs,1037_E. Trips,Graph Traversal,JAVA,Baseline,AC,2048.0,23.31,2024.69,98.86,2.0,2048,high,42,619,626.54,False,0
+bench_P4_trips_bfs_java_predictive,P4_trips_bfs,1037_E. Trips,Graph Traversal,JAVA,Predictive,AC,2048.0,23.89,2024.11,98.83,2.0,2048,high,41,610,620.48,False,0
+bench_P4_trips_bfs_java_reactive,P4_trips_bfs,1037_E. Trips,Graph Traversal,JAVA,Reactive,AC,256.0,22.98,233.02,91.02,1.0,1024,low,50,880,905.54,False,0
+bench_P4_trips_bfs_java_hybrid,P4_trips_bfs,1037_E. Trips,Graph Traversal,JAVA,Hybrid,AC,2048.0,22.34,2025.66,98.91,2.0,2048,high,43,624,635.07,False,0
+bench_P4_trips_bfs_python_baseline,P4_trips_bfs,1037_E. Trips,Graph Traversal,PYTHON,Baseline,AC,2048.0,13.13,2034.87,99.36,2.0,2048,high,35,244,251.39,False,0
+bench_P4_trips_bfs_python_predictive,P4_trips_bfs,1037_E. Trips,Graph Traversal,PYTHON,Predictive,AC,2048.0,13.37,2034.63,99.35,2.0,2048,high,35,249,258.87,False,0
+bench_P4_trips_bfs_python_reactive,P4_trips_bfs,1037_E. Trips,Graph Traversal,PYTHON,Reactive,AC,256.0,13.58,242.42,94.7,1.0,1024,low,37,236,244.13,False,0
+bench_P4_trips_bfs_python_hybrid,P4_trips_bfs,1037_E. Trips,Graph Traversal,PYTHON,Hybrid,AC,2048.0,10.62,2037.38,99.48,2.0,2048,high,38,253,264.55,False,0
+bench_P1_phone_numbers_python_baseline,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,PYTHON,Baseline,AC,2048.0,9.73,2038.27,99.53,2.0,2048,high,25,236,242.67,False,0
+bench_P1_phone_numbers_python_predictive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,PYTHON,Predictive,AC,256.0,10.39,245.61,95.94,1.0,1024,low,24,236,243.17,False,0
+bench_P1_phone_numbers_python_reactive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,PYTHON,Reactive,AC,256.0,9.3,246.7,96.37,1.0,1024,low,28,244,255.38,False,0
+bench_P1_phone_numbers_python_hybrid,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,PYTHON,Hybrid,AC,256.0,9.64,246.36,96.23,1.0,1024,low,26,236,243.99,False,0
+bench_P1_phone_numbers_cpp_baseline,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,CPP,Baseline,AC,2048.0,6.68,2041.32,99.67,2.0,2048,high,17,1012,1017.72,False,0
+bench_P1_phone_numbers_cpp_predictive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,CPP,Predictive,AC,256.0,6.25,249.75,97.56,1.0,1024,low,17,1015,1022.22,False,0
+bench_P1_phone_numbers_cpp_reactive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,CPP,Reactive,AC,256.0,6.75,249.25,97.36,1.0,1024,low,17,994,1000.36,False,0
+bench_P1_phone_numbers_cpp_hybrid,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,CPP,Hybrid,AC,256.0,6.11,249.89,97.62,1.0,1024,low,17,1027,1034.21,False,0
+bench_P1_phone_numbers_java_baseline,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,JAVA,Baseline,AC,2048.0,25.0,2023.0,98.78,2.0,2048,high,60,581,586.94,False,0
+bench_P1_phone_numbers_java_predictive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,JAVA,Predictive,AC,2048.0,25.81,2022.19,98.74,2.0,2048,high,59,588,594.78,False,0
+bench_P1_phone_numbers_java_reactive,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,JAVA,Reactive,AC,256.0,19.61,236.39,92.34,1.0,1024,low,70,783,789.78,False,0
+bench_P1_phone_numbers_java_hybrid,P1_phone_numbers,1060_A. Phone Numbers,Greedy & Strings,JAVA,Hybrid,AC,2048.0,24.98,2023.02,98.78,2.0,2048,high,62,585,595.43,False,0
+bench_P2_min_integer_python_baseline,P2_min_integer,1101_A. Minimum Integer,Number Theory,PYTHON,Baseline,AC,2048.0,9.95,2038.05,99.51,2.0,2048,high,26,247,253.32,False,0
+bench_P2_min_integer_python_predictive,P2_min_integer,1101_A. Minimum Integer,Number Theory,PYTHON,Predictive,AC,256.0,10.59,245.41,95.86,1.0,1024,low,26,253,261.65,False,0
+bench_P2_min_integer_python_reactive,P2_min_integer,1101_A. Minimum Integer,Number Theory,PYTHON,Reactive,AC,256.0,10.11,245.89,96.05,1.0,1024,low,28,244,251.08,False,0
+bench_P2_min_integer_python_hybrid,P2_min_integer,1101_A. Minimum Integer,Number Theory,PYTHON,Hybrid,AC,256.0,10.11,245.89,96.05,1.0,1024,low,26,243,252.8,False,0
+bench_P2_min_integer_java_baseline,P2_min_integer,1101_A. Minimum Integer,Number Theory,JAVA,Baseline,AC,2048.0,24.68,2023.32,98.8,2.0,2048,high,35,581,590.57,False,0
+bench_P2_min_integer_java_predictive,P2_min_integer,1101_A. Minimum Integer,Number Theory,JAVA,Predictive,AC,2048.0,25.07,2022.93,98.78,2.0,2048,high,35,600,611.3,False,0
+bench_P2_min_integer_java_reactive,P2_min_integer,1101_A. Minimum Integer,Number Theory,JAVA,Reactive,AC,256.0,22.78,233.22,91.1,1.0,1024,low,46,819,827.93,False,0
+bench_P2_min_integer_java_hybrid,P2_min_integer,1101_A. Minimum Integer,Number Theory,JAVA,Hybrid,AC,2048.0,24.15,2023.85,98.82,2.0,2048,high,38,585,600.52,False,0
+bench_P2_min_integer_cpp_baseline,P2_min_integer,1101_A. Minimum Integer,Number Theory,CPP,Baseline,AC,2048.0,6.29,2041.71,99.69,2.0,2048,high,19,1002,1012.52,False,0
+bench_P2_min_integer_cpp_predictive,P2_min_integer,1101_A. Minimum Integer,Number Theory,CPP,Predictive,AC,256.0,6.16,249.84,97.59,1.0,1024,low,20,1010,1018.33,False,0
+bench_P2_min_integer_cpp_reactive,P2_min_integer,1101_A. Minimum Integer,Number Theory,CPP,Reactive,AC,256.0,5.94,250.06,97.68,1.0,1024,low,17,1007,1013.51,False,0
+bench_P2_min_integer_cpp_hybrid,P2_min_integer,1101_A. Minimum Integer,Number Theory,CPP,Hybrid,AC,256.0,6.25,249.75,97.56,1.0,1024,low,17,1006,1013.95,False,0
+bench_P3_tree_degree_python_baseline,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,PYTHON,Baseline,AC,2048.0,10.12,2037.88,99.51,2.0,2048,high,25,242,246.66,False,0
+bench_P3_tree_degree_python_predictive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,PYTHON,Predictive,AC,256.0,10.01,245.99,96.09,1.0,1024,low,27,257,264.39,False,0
+bench_P3_tree_degree_python_reactive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,PYTHON,Reactive,AC,256.0,8.31,247.69,96.75,1.0,1024,low,26,244,250.36,False,0
+bench_P3_tree_degree_python_hybrid,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,PYTHON,Hybrid,AC,256.0,10.64,245.36,95.84,1.0,1024,low,25,237,243.19,False,0
+bench_P3_tree_degree_java_baseline,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,JAVA,Baseline,AC,2048.0,20.93,2027.07,98.98,2.0,2048,high,38,582,589.76,False,0
+bench_P3_tree_degree_java_predictive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,JAVA,Predictive,AC,2048.0,22.64,2025.36,98.89,2.0,2048,high,35,576,583.62,False,0
+bench_P3_tree_degree_java_reactive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,JAVA,Reactive,AC,256.0,19.89,236.11,92.23,1.0,1024,low,47,821,827.33,False,0
+bench_P3_tree_degree_java_hybrid,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,JAVA,Hybrid,AC,2048.0,23.87,2024.13,98.83,2.0,2048,high,36,587,596.28,False,0
+bench_P3_tree_degree_cpp_baseline,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,CPP,Baseline,AC,2048.0,6.2,2041.8,99.7,2.0,2048,high,17,1077,1084.72,False,0
+bench_P3_tree_degree_cpp_predictive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,CPP,Predictive,AC,2048.0,6.72,2041.28,99.67,2.0,2048,high,19,1079,1088.71,False,0
+bench_P3_tree_degree_cpp_reactive,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,CPP,Reactive,AC,256.0,6.23,249.77,97.56,1.0,1024,low,20,1091,1099.12,False,0
+bench_P3_tree_degree_cpp_hybrid,P3_tree_degree,1189_D1. Add on a Tree,Graph Algorithms,CPP,Hybrid,AC,2048.0,6.77,2041.23,99.67,2.0,2048,high,19,1105,1113.37,False,0
+bench_P1_prefix_sums_c_baseline,P1_prefix_sums,Prefix Sums (Light C),Data Structures,C,Baseline,AC,2048.0,20.34,2027.66,99.01,2.0,2048,high,22,293,299.07,False,0
+bench_P1_prefix_sums_c_predictive,P1_prefix_sums,Prefix Sums (Light C),Data Structures,C,Predictive,AC,2048.0,20.47,2027.53,99.0,2.0,2048,high,22,300,307.55,False,0
+bench_P1_prefix_sums_c_reactive,P1_prefix_sums,Prefix Sums (Light C),Data Structures,C,Reactive,AC,256.0,18.31,237.69,92.85,1.0,1024,low,22,292,297.83,False,0
+bench_P1_prefix_sums_c_hybrid,P1_prefix_sums,Prefix Sums (Light C),Data Structures,C,Hybrid,AC,2048.0,17.79,2030.21,99.13,2.0,2048,high,24,293,300.38,False,0
+bench_P3_floyd_warshall_c_baseline,P3_floyd_warshall,Floyd-Warshall (CPU C),Graph Algorithms,C,Baseline,AC,2048.0,6.24,2041.76,99.7,2.0,2048,high,57,323,330.38,False,0
+bench_P3_floyd_warshall_c_predictive,P3_floyd_warshall,Floyd-Warshall (CPU C),Graph Algorithms,C,Predictive,AC,256.0,6.66,249.34,97.4,1.0,1024,low,58,337,344.26,False,0
+bench_P3_floyd_warshall_c_reactive,P3_floyd_warshall,Floyd-Warshall (CPU C),Graph Algorithms,C,Reactive,AC,256.0,6.54,249.46,97.44,1.0,1024,low,57,328,334.29,False,0
+bench_P3_floyd_warshall_c_hybrid,P3_floyd_warshall,Floyd-Warshall (CPU C),Graph Algorithms,C,Hybrid,AC,256.0,6.84,249.16,97.33,1.0,1024,low,57,361,367.51,False,0
+bench_P5_knapsack_2d_dp_cpp_baseline,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,CPP,Baseline,AC,2048.0,204.43,1843.57,90.02,2.0,2048,high,182,616,622.55,False,0
+bench_P5_knapsack_2d_dp_cpp_predictive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,CPP,Predictive,AC,256.0,204.64,51.36,20.06,1.0,1024,low,185,627,636.41,False,0
+bench_P5_knapsack_2d_dp_cpp_reactive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,CPP,Reactive,AC,2048.0,179.02,1868.98,91.26,2.0,2048,low,182,624,631.14,True,565
+bench_P5_knapsack_2d_dp_cpp_hybrid,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,CPP,Hybrid,AC,2048.0,203.47,1844.53,90.06,2.0,2048,low,183,609,616.24,True,546
+bench_P5_knapsack_2d_dp_python_baseline,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,PYTHON,Baseline,AC,2048.0,221.17,1826.83,89.2,2.0,2048,high,96,314,319.12,False,0
+bench_P5_knapsack_2d_dp_python_predictive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,PYTHON,Predictive,AC,256.0,221.6,34.4,13.44,1.0,1024,low,96,328,334.44,False,0
+bench_P5_knapsack_2d_dp_python_reactive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,PYTHON,Reactive,AC,2048.0,174.63,1873.37,91.47,2.0,2048,low,97,319,327.07,True,261
+bench_P5_knapsack_2d_dp_python_hybrid,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,PYTHON,Hybrid,AC,2048.0,221.64,1826.36,89.18,2.0,2048,low,98,325,332.2,True,256
+bench_P5_knapsack_2d_dp_java_baseline,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,JAVA,Baseline,AC,2048.0,253.71,1794.29,87.61,2.0,2048,high,248,654,660.57,False,0
+bench_P5_knapsack_2d_dp_java_predictive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,JAVA,Predictive,MLE,256.0,256.0,0.0,0.0,1.0,1024,low,135,863,870.15,False,0
+bench_P5_knapsack_2d_dp_java_reactive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,JAVA,Reactive,MLE,2048.0,255.26,1792.74,87.54,2.0,2048,low,137,850,856.27,True,775
+bench_P5_knapsack_2d_dp_java_hybrid,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,JAVA,Hybrid,MLE,2048.0,255.98,1792.02,87.5,2.0,2048,low,143,877,885.08,True,794
+bench_P5_knapsack_2d_dp_c_baseline,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,C,Baseline,AC,2048.0,204.55,1843.45,90.01,2.0,2048,high,70,352,358.42,False,0
+bench_P5_knapsack_2d_dp_c_predictive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,C,Predictive,AC,256.0,204.75,51.25,20.02,1.0,1024,low,65,340,346.99,False,0
+bench_P5_knapsack_2d_dp_c_reactive,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,C,Reactive,AC,2048.0,176.98,1871.02,91.36,2.0,2048,low,69,353,357.66,True,295
+bench_P5_knapsack_2d_dp_c_hybrid,P5_knapsack_2d_dp,0-1 Knapsack 2D DP (Memory-Heavy),Dynamic Programming,C,Hybrid,AC,2048.0,177.78,1870.22,91.32,2.0,2048,low,69,350,358.69,True,290

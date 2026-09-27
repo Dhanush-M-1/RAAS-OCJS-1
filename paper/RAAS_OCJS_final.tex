@@ -65,11 +65,11 @@
 \maketitle
 
 \begin{abstract}
-Online Code Judge (OJ) platforms commonly isolate submissions by assigning the same worst-case resource ceiling, typically 2048 MiB of RAM and 2.0 CPU cores. Although this prevents memory-intensive tasks from triggering Out-Of-Memory (OOM) failures, it leads to substantial resource underutilization. In our 72-run live benchmark, 75.0\% of submissions used less than 25 MiB of resident set size, with a mean of 59.1 MiB against a 2048 MiB ceiling. This fixed allocation also limits concurrency on non-elastic hardware and increases reserved cloud capacity.
+Online Code Judge (OJ) platforms commonly isolate submissions by assigning the same worst-case resource ceiling, typically 2048 MiB of RAM and 2.0 CPU cores. Although this prevents memory-intensive tasks from triggering Out-Of-Memory (OOM) failures, it leads to substantial resource underutilization. In our 72-run live benchmark, 76.8\% of submissions used less than 25 MiB of resident set size, with a mean of 49.2 MiB against a 2048 MiB ceiling. This fixed allocation also limits concurrency on non-elastic hardware and increases reserved cloud capacity.
 
 This paper presents RAAS-OCJS (Resource-Aware Adaptive Scheduling for Online Contest Judge Systems), a dynamic resource management framework that combines Linux cgroups v2 with an AST-based XGBoost classifier to predict execution requirements and adapt resource allocation. We collected kernel-level memory and CPU profiles from C++, Python, Java, and C submissions using problems from Hugging Face CodeContests and IBM CodeNet. These measurements were then used to drive a 10,000-submission contest simulation and a theoretical AWS EC2 cost projection, and were repeated at a reduced 128 MiB tier to establish the lower bound for the tier size.
 
-The simulation shows a 47.57\% reduction in reserved RAM (9,514.75 GB) and a 22.50\% reduction in reserved CPU core-hours compared with static allocation, achieved by starting every submission in the bounded tier and promoting only on measured demand. Earlier-routing strategies fare worse than might be expected: prediction alone reaches 40.49\%, and combining prediction with the watermark reaches only 22.71\%, because predicted-heavy submissions are assigned an uncapped container that carries no reserved capacity. In a simulated 500-submission freeze rush, average queue wait fell from 13,879.4 ms to 0.0 ms and P95 turnaround from 27,410.7 ms to 1,252.2 ms. The classifier reaches 94.45\% held-out accuracy on its CodeNet training distribution, but on the six-problem benchmark corpus used here its routing accuracy is 33.3\%, below the 77.8\% that a constant \emph{light} prediction would score. We report both, and treat the gap as a distribution-shift finding rather than a defect: it is the reason the watermark, not the classifier, carries this design. A real 128 MiB boundary experiment additionally isolates a JVM-specific failure mode: C, C++, and Python were all promoted in time and returned correct verdicts, whereas Java was promoted at 731--763 ms, after HotSpot had already been OOM-killed. These results indicate that adaptive resource allocation can improve resource utilization and concurrency in online judge systems.   
+The simulation shows a 47.22\% reduction in reserved RAM (9,443.00 GB) and a 22.09\% reduction in reserved CPU core-hours compared with static allocation, achieved by starting every submission in the bounded tier and promoting only on measured demand. Earlier-routing strategies fare worse than might be expected: prediction alone reaches 40.23\%, and combining prediction with the watermark reaches only 22.45\%, because predicted-heavy submissions are assigned an uncapped container that carries no reserved capacity. In a simulated 500-submission freeze rush, average queue wait fell from 12,386.2 ms to 0.0 ms and P95 turnaround from 24,918.4 ms to 1,190.8 ms. The classifier reaches 94.45\% held-out accuracy on its CodeNet training distribution, but on the six-problem benchmark corpus used here its routing accuracy is 33.3\%, below the 77.8\% that a constant \emph{light} prediction would score. We report both, and treat the gap as a distribution-shift finding rather than a defect: it is the reason the watermark, not the classifier, carries this design. To locate the floor we also re-ran the full benchmark at a 128 MiB tier. It fails, for three independent reasons, and we report it as the negative result that sets the 256 MiB floor: the C++ toolchain alone needs 189--211 MB and so cannot compile inside the tier at all, the 38.4 MiB of watermark headroom is too narrow to outrun a submission needing twice the tier, and JVM overhead pushes a 256 MiB container past its own ceiling when the runtime is configured with a 512 MB heap allowance. 52 of 72 runs returned AC at 128 MiB against 69 of 72 at the shipped 256 MiB tier. These results indicate that adaptive resource allocation can improve resource utilization and concurrency in online judge systems.   
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -90,8 +90,8 @@ This convention creates three practical problems:
 
 To address this, this paper presents \textbf{RAAS-OCJS} (Resource-Aware Adaptive Scheduling for Online Contest Judge Systems), which introduces a two-tier execution framework:
 \begin{enumerate}
-    \item A lightweight default sandbox (\textbf{Tier 1: 256~MiB RAM, 1.0 CPU core}) that completed 30 of the 38 light-tier submissions in our 72-run benchmark (78.9\%) without ever needing promotion, and 80.4\% of submissions in the simulated contest;
-    \item An active Linux cgroup~v2 soft watermark ($\theta = 70\%$, corresponding to 179.2~MiB) that detects high memory utilization in-flight and lifts the container's memory and CPU limits to \emph{uncapped} mid-execution, without restarting the container or losing process state. Measured from submission acceptance to completed promotion this takes 236--802 ms across 16 promoted runs, depending on the language runtime;
+    \item A lightweight default sandbox (\textbf{Tier 1: 256~MiB RAM, 1.0 CPU core}) that completed 30 of the 38 light-tier submissions in our 72-run benchmark (78.9\%) without ever needing promotion, and 80.0\% of submissions in the simulated contest;
+    \item An active Linux cgroup~v2 soft watermark ($\theta = 70\%$, corresponding to 179.2~MiB) that detects high memory utilization in-flight and lifts the container's memory and CPU limits to \emph{uncapped} mid-execution, without restarting the container or losing process state. Measured from submission acceptance to completed promotion this takes 253--794 ms across 16 promoted runs, depending on the language runtime;
     \item An offline Machine Learning (XGBoost) classifier driven by Tree-sitter Abstract Syntax Tree (AST) static structural metrics that predicts memory-intensive jobs upon ingress.
 \end{enumerate}
 
@@ -112,7 +112,7 @@ The system-wide memory waste percentage $W$ across a contest of $N$ submissions 
 \begin{equation}
 W = \left[ \frac{\sum_{i=1}^N \left( R_{\mathrm{alloc}}(s_i) - R_{\mathrm{peak}}(s_i) \right)}{\sum_{i=1}^N R_{\mathrm{alloc}}(s_i)} \right] \times 100\%
 \end{equation}
-Because introductory and greedy problems require merely 6~MiB to 25~MiB, $R_{\mathrm{peak}}(s_i) \ll R_{\mathrm{max}}$. Our simulation of this waste model reports 97.44\% of reserved memory wasted under the static baseline at the shipped tier (97.47\% at the 128~MiB tier).
+Because introductory and greedy problems require merely 6~MiB to 25~MiB, $R_{\mathrm{peak}}(s_i) \ll R_{\mathrm{max}}$. Our simulation of this waste model reports 97.47\% of reserved memory wasted under the static baseline at the shipped tier (97.48\% at the 128~MiB tier).
 
 \subsection{Concurrency Capacity and Queueing Collapse}
 On a host with usable physical RAM $M_{\mathrm{host}}$ and operating system reserve $M_{\mathrm{os}}$, the safe concurrency capacity $K$ under non-overcommitted execution is:
@@ -307,41 +307,23 @@ T_{\mathrm{tear}} + T_{\mathrm{net\_out}}
 
 % MOVED TABLE: Placed here so it renders in Section V or VI
 \begin{table*}[!t]
-\caption{Measured Behaviour at the 128 MiB Boundary (Watermark 89.6 MiB)}
+\caption{Outcome of the Full 72-Run Benchmark at a 128 MiB Tier}
 \label{tab:128mb_boundary}
 \centering
 \small
-\begin{tabularx}{\textwidth}{|c|Y|c|c|Y|}
+\begin{tabularx}{\textwidth}{|c|c|c|c|c|c|Y|}
 \hline
-\textbf{Language} &
-\textbf{Peak, Light Programs} &
-\textbf{Peak, Knapsack (Uncapped)} &
-\textbf{Verdict} &
-\textbf{Measured Outcome} \\
+\textbf{Language} & \textbf{Runs} & \textbf{AC} & \textbf{SE} & \textbf{MLE} & \textbf{RE} & \textbf{Dominant Failure} \\
 \hline
-C &
-21.3 MB &
-203.6 MB &
-AC &
-Promoted at 286--313 ms, mid-execution \\
+C & 12 & 9 & 0 & 2 & 1 & Knapsack outgrows the tier \\
 \hline
-C++ &
-6.8 MB &
-203.0 MB &
-AC &
-Promoted at 487--493 ms, mid-execution \\
+C++ & 20 & 9 & \textbf{8} & 3 & 0 & \textbf{Will not compile: g++ needs 189--211 MB} \\
 \hline
-Python &
-13.6 MB &
-221.8 MB &
-AC &
-Promoted at 236--260 ms, mid-execution \\
+Python & 20 & 17 & 0 & 2 & 1 & Knapsack outgrows the tier \\
 \hline
-Java &
-25.1 MB &
-253.8 MB &
-\textbf{MLE} &
-Promotion recorded at 731--763 ms, \emph{after} the kill \\
+Java & 20 & 17 & 0 & 2 & 1 & Knapsack outgrows the tier \\
+\hline
+\textbf{Total} & \textbf{72} & \textbf{52} & \textbf{8} & \textbf{9} & \textbf{3} & --- \\
 \hline
 \end{tabularx}
 \end{table*}
@@ -359,20 +341,20 @@ To estimate resource savings across a full-scale contest, we ran a discrete-even
 \hline
 \textbf{Strategy} & \textbf{RAM Reserved} & \textbf{Saved} & \textbf{CPU Core-Hrs} & \textbf{Wasted} \\
 \hline
-Static (2048 MiB) & 20,000.00 GB & --- & 4.551 & 97.44\% \\
+Static (2048 MiB) & 20,000.00 GB & --- & 4.337 & 97.47\% \\
 \hline
-Predictive & 11,901.00 GB & 40.49\% & 3.781 & 95.76\% \\
+Predictive & 11,953.50 GB & 40.23\% & 3.620 & 95.76\% \\
 \hline
-\textbf{Reactive} & \textbf{10,485.25 GB} & \textbf{47.57\%} & \textbf{3.527} & 95.25\% \\
+\textbf{Reactive} & \textbf{10,557.00 GB} & \textbf{47.22\%} & \textbf{3.379} & 95.76\% \\
 \hline
-Hybrid & 15,457.00 GB & 22.71\% & 4.156 & 96.75\% \\
+Hybrid & 15,509.50 GB & 22.45\% & 3.939 & 96.77\% \\
 \hline
 \end{tabular}
 \end{table}
 
-Two results here were not anticipated. First, Reactive reserves less than every other strategy, including Hybrid. Hybrid pre-assigns each submission its classifier labels heavy to a container with no memory limit, and such a container carries no reserved capacity, so it must be charged at the worst-case ceiling; Reactive starts everything bounded and escalates only when the kernel reports actual pressure. Prediction is therefore not free, it costs reservation, and on this corpus it costs more than it saves.
+Two results here were not anticipated. First, Reactive reserves less than every other strategy, including Hybrid. Hybrid pre-assigns each submission its classifier labels heavy to a container with no memory limit, and such a container carries no reserved capacity, so it must be charged at the worst-case ceiling; Reactive starts everything bounded and escalates only when the kernel reports actual pressure. Because Hybrid and Predictive share one classifier for the initial tier, they start the identical set of submissions in the uncapped tier, and promotion can only raise a reservation and never lower it. Hybrid therefore reserves strictly more than Predictive: it pays for the classifier's false alarms and still needs the watermark. Prediction is not free, it costs reservation, and on this corpus it costs more than it saves.
 
-Second, no strategy changes steady-state latency: P95 turnaround spans 1248.89--1253.98~ms across all four, a spread inside run-to-run noise. The saving is free in latency terms, but it is not a latency improvement.
+Second, no strategy changes steady-state latency: P95 turnaround spans 1185.86--1192.01~ms across all four, a spread inside run-to-run noise. The saving is free in latency terms, but it is not a latency improvement.
 
 \subsection{Scoreboard Freeze Rush Stress Test}
 During the final 30 seconds of a competitive programming contest, participants submit a burst of solutions simultaneously. We modeled a 500-submission flash burst from the measured profiles, run through the same simulation as Section~\ref{tab:macro_sim} rather than as a live 500-submission run.
@@ -388,46 +370,20 @@ During the final 30 seconds of a competitive programming contest, participants s
 \hline
 Concurrent Slots & 7 & 56 & 8.0$\times$ expansion \\
 \hline
-Avg Queue Wait & 13,879.4 ms & 0.0 ms & \textbf{100\% eliminated} \\
+Avg Queue Wait & 12,386.2 ms & 0.0 ms & \textbf{100\% eliminated} \\
 \hline
-P95 Queue Wait & 26,503.6 ms & 0.0 ms & \textbf{100\% eliminated} \\
+P95 Queue Wait & 24,687.9 ms & 0.0 ms & \textbf{100\% eliminated} \\
 \hline
-P95 Turnaround & 27,410.7 ms & 1,252.2 ms & \textbf{21.9$\times$} \\
+P95 Turnaround & 24,918.4 ms & 1,190.8 ms & \textbf{20.9$\times$} \\
 \hline
-Burst Drain Time & 59.3 s & 31.0 s & 28.3 s faster \\
+Burst Drain Time & 56.5 s & 31.2 s & 25.3 s faster \\
 \hline
 \end{tabularx}
 \end{table}
 
-The static baseline queues severely: an average wait of 13.9 seconds and a 59.3 second drain that leaves jobs completing after the contest deadline. Expanding safe concurrency to 56 slots drives queue wait to \textbf{0.0~ms} and completes the burst in 31.0 seconds. All three adaptive strategies behave identically here, which is expected: promotion is unnecessary in a rush, since almost every submission fits the bounded tier.
+The static baseline queues severely: an average wait of 12.4 seconds and a 56.5 second drain that leaves jobs completing after the contest deadline. Expanding safe concurrency to 56 slots drives queue wait to \textbf{0.0~ms} and completes the burst in 31.2 seconds. All three adaptive strategies behave identically here, which is expected: promotion is unnecessary in a rush, since almost every submission fits the bounded tier.
 
-The gain comes from admitting more concurrent slots, not from finishing individual submissions faster. Overcommitting the baseline to 14 slots also recovers most of the wait (437.0~ms) and drains in 31.8~s, but at 186\% host memory utilisation. That is the failure mode the tiered scheduler avoids, and it is worth stating plainly: an overcommitted static baseline is competitive on throughput and unsafe on memory, so the comparison is not a throughput win but a throughput-equal, memory-safe one.
-
-\subsection{Classifier Behaviour on the Benchmark Corpus}
-\label{sec:classifier}
-The predictive path is only as good as the tier it selects. We therefore scored the classifier's actual routing against ground truth on the 18-cell corpus, where only the 2D knapsack problem is genuinely memory-resident (four language cells, 200--254 MB peaks).
-
-\begin{table}[!t]
-\caption{Classifier Routing vs Ground Truth (18 cells)}
-\label{tab:confusion}
-\centering
-\small
-\begin{tabular}{|P{2.6cm}|c|c|}
-\hline
- & \textbf{Predicted Heavy} & \textbf{Predicted Light} \\
-\hline
-Truly Heavy (4) & 0 & 4 \\
-\hline
-Truly Light (14) & 8 & 6 \\
-\hline
-\end{tabular}
-\end{table}
-
-Routing accuracy is \textbf{33.3\%}. A constant prediction of \emph{light} would score 77.8\% on the same cells. The classifier missed every heavy cell and raised eight false alarms, so on this corpus its routing is worse than not predicting at all.
-
-This is not an artifact of the benchmark harness. Independent single-submission probes through the API reproduce it: a program that allocates a 200 MiB buffer is routed to the bounded tier, while a collections-heavy program that peaks at 9.6 MB is routed to the uncapped tier.
-
-The result needs care: it is not the same as saying the model is poor. On its own CodeNet distribution the unified model reaches 94.45\% held-out accuracy and the specialised C++ model 95.45\% (\texttt{model\_comparison.csv}). Table~\ref{tab:confusion} measures a different thing on a different corpus. The honest reading is distribution shift on a small corpus, not model failure. It does, however, establish that resource safety resting on such a classifier would be fragile, whereas the watermark does not rest on it.
+The gain comes from admitting more concurrent slots, not from finishing individual submissions faster. Overcommitting the baseline to 14 slots also recovers most of the wait (250.4~ms) and drains in 31.6~s, but at 186\% host memory utilisation. That is the failure mode the tiered scheduler avoids, and it is worth stating plainly: an overcommitted static baseline is competitive on throughput and unsafe on memory, so the comparison is not a throughput win but a throughput-equal, memory-safe one.
 
 \section{Theoretical Cloud Provisioning Projection}
 Our bare-metal calibration used dedicated local hardware, but many online judges run on public cloud infrastructure instead. To estimate the effect there, we mapped our measured kernel profiles onto an AWS EC2 cluster of \texttt{c6i.4xlarge} instances (16 vCPUs, 32~GB RAM, USD~0.68 per hour). Every figure below is derived from the shipped 256~MiB tier, the instance size, and the hourly price rather than transcribed, and assumes 87.5\% host utilisation when packing pods, the same packing ceiling the static baseline achieves (14 pods $\times$ 2048~MiB of 32~GB). These are projections, not deployed cloud measurements.
@@ -451,7 +407,7 @@ VMs for 500-Sub Burst & 36 & 5 & \textbf{86.1\%} fewer \\
 \hline
 Cluster Hourly Cost & USD 24.48 & USD 3.40 & \textbf{USD 21.08} (86.1\%) \\
 \hline
-RAM Reserved (10,000 Subs) & 20,000.00 GB & 10,485.25 GB & \textbf{47.57\%} \\
+RAM Reserved (10,000 Subs) & 20,000.00 GB & 10,557.00 GB & \textbf{47.22\%} \\
 \hline
 \end{tabular}
 \end{table}
@@ -463,30 +419,40 @@ The tier size dominates this projection, and it is a design choice rather than a
 \section{Boundary Stress Analysis and Future Scopes}
 
 \subsection{Squeezing Tier 1 to 128 MiB: The Java Failure Boundary}
-To find the lower limit of adaptive scheduling, we re-ran the full 72-run benchmark with Tier~1 reduced to \textbf{128~MiB} ($\theta = 70\%$, watermark $= 89.6$~MiB, leaving a 38.4~MiB buffer before the hard limit). This is a separate measurement at a second tier, not an extrapolation from the 256~MiB results: 69 of 72 runs returned AC and 3 returned MLE, and all three failures are Java on the 2D knapsack. The same submission is AC in all four strategies at the shipped 256~MiB tier.
+To locate the floor, we re-ran the full 72-run benchmark with Tier~1 set to \textbf{128~MiB} ($\theta = 70\%$, watermark $= 89.6$~MiB, leaving a 38.4~MiB buffer below the hard limit). We also verified the tier was genuinely enforced before trusting any figure, which turned out to matter; see the note on swap at the end of this subsection.
 
-The instructive detail is in the timing, not the verdict. Under the promoting strategies Java's promotion is \emph{recorded as completing}, at 731--763~ms, and the run still ends in a memory-limit kill. The watermark fires and the limit is lifted, but only after the JVM has already committed enough heap to trip the killer, so the rescue arrives late. C, C++ and Python, by contrast, are promoted at 236--493~ms and complete.
+The tier fails, and the interesting result is that it fails for three independent reasons rather than one. 52 of 72 runs returned AC, against 69 of 72 at the shipped 256~MiB tier.
 
-The cause is the rate at which each runtime claims memory, not misclassification or a broken watermark. Java's baseline peak on this problem is 253.8~MB against C's 203.6~MB and C++'s 203.0~MB, so it crosses a 128~MiB ceiling in roughly half the time and outruns the promotion path. Predictive, which has no watchdog, fails as well and without a promotion at all.
+\textbf{1. The C++ toolchain does not fit.} Eight runs returned a bare \texttt{SE} with no case results and zero CPU time, all of them C++: the container never produced a compiled binary. Measuring the compiler directly, \texttt{g++ -O2} peaks at 189--211~MB of resident memory on these sources (P1 189.4~MB, P2 190.9~MB, P3 198.2~MB, P4 210.8~MB). Compilation runs inside the submission container, so a 128~MiB tier cannot build them at all. This is a property of the tier, not of the scheduler: no strategy can rescue a submission that never compiled. The knapsack source compiles in 60.6~MB and so does reach execution, which is why C++ shows both \texttt{SE} and \texttt{MLE} rather than one or the other.
 
-We therefore report \textbf{256~MiB as the practical minimum Tier~1 limit for a polyglot judge that must support JVM runtimes}, and note that this limit is set by promotion responsiveness rather than by the classifier. The mechanism is sound; it is simply not fast enough for this runtime at this tier.
+\textbf{2. The watermark window is too narrow.} Every knapsack cell failed in every language under every strategy, including Reactive and Hybrid, which did promote. Promotion completed at 253--794~ms, but the program crosses 128~MiB before it can land. The window between the watermark (89.6~MiB) and the hard limit is only 38.4~MiB, and these submissions allocate at a rate that consumes it well inside the promotion path's latency. At the 256~MiB tier the same window is 76.8~MiB and the mechanism holds for C, C++ and Python.
+
+\textbf{3. The JVM heap allowance contradicts the container cap.} Java was the only language to fail at the shipped tier as well: three \texttt{MLE} verdicts at 256~MiB, in Predictive, Reactive and Hybrid alike, with peaks of 255--256~MB. The runtime is started with \texttt{-Xmx512m}, a 512~MB heap allowance, inside a 256~MiB container. The JVM grows its heap toward that allowance and crosses the container ceiling. The two limits are mutually inconsistent and should be reconciled by sizing \texttt{-Xmx} as a fraction of the tier, or by raising the tier for JVM workloads.
+
+Taken together these set \textbf{256~MiB as the practical minimum Tier~1 limit}, but for reasons different from those we initially expected. The limit is not set by the classifier, and only partly by the promotion mechanism: it is set by the largest of three demands the tier must simultaneously satisfy, namely the toolchain used to build the submission, the watermark window needed to promote it in time, and the runtime's own overhead above the program's working set.
+
+\emph{A note on how the tier was enforced.} Our first 128~MiB run reported that C, C++ and Python all passed, and we initially read this as evidence that 128~MiB was safe for native and managed languages alike. It was not. The judge set \texttt{--memory} on the container but not \texttt{--memory-swap}, and Docker defaults the swap limit to the same value as \texttt{--memory}, so the effective ceiling was roughly twice the nominal tier. A probe that allocates and touches a chosen footprint survived 235~MB and was killed at 245~MB under a nominal 128~MiB tier. Passing swap equal to memory removes the allowance, after which the same probe survives 120~MB and is killed at 130~MB. The figures in this subsection are from runs with the tier genuinely enforced. The same default also inflated every peak reported for a capped run, since \texttt{memory.current} cannot exceed \texttt{memory.max} and the peak is sampled from \texttt{memory.current}: a capped run reports its own limit as its peak, so true demand is only observable in uncapped runs.
 
 \subsection{Future Research Scopes}
 Based on these boundary observations, we outline five key future scopes:
 \begin{enumerate}
-    \item \textbf{Polyglot Language-Aware Tier Sizing}: Dynamically provisioning 128~MiB for native C/C++ and Python submissions while reserving 256~MiB strictly for Java, unlocking 42+ slots on physical hosts without JVM failures.
-    \item \textbf{Dynamic Watermark Tuning}: Lowering the watermark to 50\% (64.0~MiB) for 128~MiB containers to restore a 64~MiB safety buffer for managed languages.
-    \item \textbf{JVM Ergonomic Tuning}: Invocating Java with \texttt{-XX:+UseSerialGC} to enforce 1~MB allocation increments instead of multi-megabyte G1GC regions.
-    \item \textbf{Ephemeral Swap Cushioning}: Enabling a small 128~MiB swap buffer (\texttt{--memory-swap=256m}) to catch microsecond memory spikes during promotion without OOM kills.
+    \item \textbf{Toolchain-Aware Tier Sizing}: A 128~MiB tier cannot compile C++ at all, since \texttt{g++} alone peaks at 189--211~MB, so tier selection must account for the build step and not only for the runtime. Measuring per-language build cost and provisioning the tier as \texttt{max(build, runtime)} would let lighter languages run in a smaller tier without stranding compiled ones.
+    \item \textbf{Watermark Tuning Against Allocation Rate}: The 38.4~MiB window at a 128~MiB tier is too narrow to outrun a submission needing twice the tier, whereas 76.8~MiB holds at 256~MiB. What matters is not the fraction but the absolute window relative to how fast a submission claims memory, which argues for sizing the watermark from a measured allocation rate rather than a fixed percentage.
+    \item \textbf{Reconciling \texttt{-Xmx} with the Tier}: The runtime is configured with a 512~MB heap allowance inside a 256~MiB container, which cannot be honoured. Sizing \texttt{-Xmx} below the tier, and pairing it with an allocator that grows heap in smaller increments such as \texttt{-XX:+UseSerialGC}, would remove the contradiction we measured.
+    \item \textbf{Deliberate, Bounded Swap}: We disabled swap because Docker's default was silently doubling the tier and invalidating our measurements. A small, explicitly sized allowance (e.g. \texttt{--memory-swap} 25\% above \texttt{--memory}) could absorb the allocation spikes that occur during promotion, provided the tier's real ceiling is stated rather than left to a default.
     \item \textbf{Hardware-Level MicroVM Isolation}: Integrating Firecracker or gVisor to provide kernel-level security hardening for the Heavy execution tier.
 \end{enumerate}
 
 \section{Conclusion}
-Fixed, worst-case resource limits reduce how many submissions an online judge can run concurrently, and that effect is most visible on fixed physical hardware where more machines cannot simply be added. In our simulations, seeded with real measured profiles, starting every submission in a bounded 256~MiB tier and promoting only on measured kernel pressure reclaimed 47.57\% of reserved memory and 22.50\% of reserved CPU core-hours relative to a static 2048~MiB baseline. The simulated 500-submission burst showed average queue wait falling from 13,879.4~ms to 0.0~ms, with a correspondingly shorter clear time.
+Fixed, worst-case resource limits reduce how many submissions an online judge can run concurrently, and that effect is most visible on fixed physical hardware where more machines cannot simply be added. In our simulations, seeded with real measured profiles, starting every submission in a bounded 256~MiB tier and promoting only on measured kernel pressure reclaimed 47.22\% of reserved memory and 22.09\% of reserved CPU core-hours relative to a static 2048~MiB baseline. The simulated 500-submission burst showed average queue wait falling from 12,386.2~ms to 0.0~ms, with a correspondingly shorter clear time.
 
-Two findings temper the result, and we consider both load-bearing rather than incidental. First, prediction did not pay for itself on this corpus. Routing by the classifier alone reached 40.49\%, and prediction combined with the watermark reached only 22.71\%, because a container the classifier marks heavy is left uncapped and therefore carries no reserved capacity to count as saving. Reactive promotion, which commits little and escalates on evidence, was the most efficient strategy measured, at 47.57\%. That the mechanism outperforms the predictor is the paper's more defensible claim, and it points to classifier reuse rather than classifier reliance as the design direction.
+Three findings temper the result, and we consider all three load-bearing rather than incidental.
 
-Second, the 128~MiB boundary test surfaced a real limitation for JVM submissions. Java was promoted at 731--763~ms and was still killed, because it claims memory faster than the promotion path can respond. This is a constraint on tier sizing, not on the watermark mechanism, and it sets 256~MiB as the practical floor for a polyglot judge supporting JVM runtimes.
+First, prediction did not pay for itself on this corpus. Routing by the classifier alone reached 40.23\%, and prediction combined with the watermark reached only 22.45\%, because a container the classifier marks heavy is left uncapped and therefore carries no reserved capacity to count as saving. Since the two strategies share one classifier for the initial tier and promotion can only raise a reservation, Hybrid can never reserve less than Predictive: it pays for the classifier's false alarms and still needs the watermark. Reactive promotion, which commits little and escalates on evidence, was the most efficient strategy measured, at 47.22\%. That the mechanism outperforms the predictor is the paper's more defensible claim, and it points to classifier reuse rather than classifier reliance as the design direction.
+
+Second, the classifier is weak outside its training distribution. It routes 33.3\% of submissions correctly on our six-problem corpus, below the 77.8\% a constant \emph{light} prediction would score, despite reaching 94.45\% held-out accuracy on CodeNet. A system whose resource safety depended on that classifier would be fragile; the watermark does not depend on it, which is what makes a bounded-tier start safe to deploy.
+
+Third, our attempt to locate the floor by squeezing Tier~1 to 128~MiB failed for three independent reasons, and we report that failure rather than a tidier positive result, because it is what establishes the floor. The C++ toolchain alone needs 189--211~MB and cannot build a submission inside the tier; the 38.4~MiB watermark window is too narrow to promote a submission that outgrows the tier, so every strategy lost the memory-heavy problem; and the JVM is configured with a heap allowance twice the size of its container, an inconsistency that surfaces as \texttt{MLE} at 256~MiB as well. The tier must therefore simultaneously accommodate the build step, the watermark window needed for timely promotion, and the runtime's overhead above the program's working set. It is the largest of those three, not the classifier, that sets 256~MiB as the practical minimum.
 
 Taken together, these results indicate that adaptive resource allocation is a practical direction for online code judge infrastructure, with the watermark rather than the classifier as its load-bearing component. The cloud cost figures remain a projection, and the approach still needs testing against a wider range of real, larger-scale workloads.
 

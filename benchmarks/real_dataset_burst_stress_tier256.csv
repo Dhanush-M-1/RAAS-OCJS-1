@@ -1,6 +1,6 @@
 Scenario,Strategy,Concurrent_Slots,Peak_Allocated_RAM_MB,Host_RAM_Utilization_Pct,Avg_Queue_Wait_ms,P95_Queue_Wait_ms,Avg_E2E_Latency_ms,Avg_Turnaround_ms,P95_Turnaround_ms,Burst_Drain_Time_s
-Baseline (Safe 7 Slots),Baseline,7,14336.0,93.3,13879.4,26503.6,824.2,14703.6,27410.7,59.3
-Baseline (Overcommitted 14 Slots),Baseline,14,28672.0,186.7,437.0,1105.6,824.2,1261.1,2180.5,31.8
-Predictive (Adaptive 56 Slots),Predictive,56,14336.0,93.3,0.0,0.0,829.3,829.3,1252.2,31.0
-Reactive (Adaptive 56 Slots),Reactive,56,14336.0,93.3,0.0,0.0,842.1,842.1,1249.1,31.1
-Hybrid (Adaptive 56 Slots),Hybrid,56,14336.0,93.3,0.0,0.0,835.2,835.2,1254.1,31.1
+Baseline (Safe 7 Slots),Baseline,7,14336.0,93.3,12386.2,23847.2,782.4,13168.6,24918.4,56.5
+Baseline (Overcommitted 14 Slots),Baseline,14,28672.0,186.7,250.4,829.1,782.6,1033.0,1783.0,31.6
+Predictive (Adaptive 56 Slots),Predictive,56,14336.0,93.3,0.0,0.0,795.5,795.5,1189.2,31.1
+Reactive (Adaptive 56 Slots),Reactive,56,14336.0,93.3,0.0,0.0,807.1,807.1,1186.8,31.2
+Hybrid (Adaptive 56 Slots),Hybrid,56,14336.0,93.3,0.0,0.0,794.9,794.9,1190.8,31.2
