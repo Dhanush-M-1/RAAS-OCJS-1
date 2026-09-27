@@ -55,7 +55,7 @@ async fn judge(submission: Submission, policy: &(dyn TierPolicy + Send + Sync)) 
     let allocated_mem = if outcome.tier_promoted || tier == policy::Tier::High {
         0
     } else {
-        docker::LOW_MEM_HARD_LIMIT
+        docker::low_mem_hard_limit()
     };
     let verdict = outcome
         .results

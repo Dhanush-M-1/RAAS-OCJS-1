@@ -31,9 +31,27 @@ import time
 import requests
 from datasets import load_dataset
 
-SERVER_URL = "http://localhost:3000"
+# Target the judge over the network by default: the calibration host runs the
+# daemon and is reached from the workstation that drives the benchmark. Override
+# with JUDGE_URL=http://localhost:3000 to run against a local daemon.
+SERVER_URL = os.environ.get("JUDGE_URL", "http://192.168.0.111:3000")
 SUBMIT_ENDPOINT = f"{SERVER_URL}/submit"
 HEALTH_ENDPOINT = f"{SERVER_URL}/health"
+
+# ---------------------------------------------------------------------------
+# Tier sizing. These MUST match the judge's own constants or every derived
+# figure (simulation, burst slots, cloud projection) is fiction.
+#   server/src/docker.rs: LOW_MEM_HARD_LIMIT = 256 MiB, HIGH_WATERMARK_PCT = 70
+# The static baseline is the 2048 MiB worst-case convention the paper compares
+# against; it is a comparison convention, not a judge setting.
+# ---------------------------------------------------------------------------
+LIGHT_TIER_MB = int(os.environ.get("LIGHT_TIER_MB", "256"))
+BASELINE_TIER_MB = 2048
+# A promoted container is lifted to *uncapped* by `docker update --memory 0`,
+# not to a 2048 MiB tier. For a reservation model we charge a promoted
+# submission BASELINE_TIER_MB, which is conservative: it credits RAAS-OCJS
+# with a ceiling the system does not actually impose.
+PROMOTED_TIER_MB = BASELINE_TIER_MB
 
 # Physical Hardware Calibration Profile (Query verified: Intel i5-13420H, 15 GiB RAM)
 HOST_SPECS = {
@@ -45,6 +63,7 @@ HOST_SPECS = {
     "cpu_max_mhz": 4600.0,
     "l3_cache_mb": 12.0,
     "total_ram_mb": 15360.0,   # 15 GiB usable physical RAM
+    "os_reserved_mb": 1024.0,  # reserve held back for the OS, per Section II
     "os": "Linux 7.1.3-201.fc44.x86_64 (Fedora)",
     "storage": "NVMe SSD"
 }
@@ -55,8 +74,7 @@ CLOUD_INSTANCE = {
     "vcpus": 16,
     "ram_gb": 32,
     "hourly_cost_usd": 0.68,
-    "baseline_safe_slots": 14,
-    "adaptive_safe_slots": 64
+    "baseline_safe_slots": 14   # 28,672 MiB usable / 2048 MiB; adaptive is derived per tier
 }
 
 STRATEGIES = ["baseline", "predictive", "reactive", "hybrid"]
@@ -71,6 +89,47 @@ def check_server():
         print(f"[ERROR] Cannot connect to {SERVER_URL}: {e}")
         return False
     return False
+
+def validate_solution(pname, lang, candidates, testcases, max_try=6):
+    """Return the first candidate solution that actually passes its own public test.
+
+    deepmind/code_contests is crowd-sourced: a non-trivial fraction of its
+    solutions do not compile or compute the wrong answer. Taking the first one
+    silently produced RE/SE verdicts that had nothing to do with the scheduling
+    policy under test, so we screen them before they reach the experiment.
+    """
+    import re as _re
+    tried = 0
+    for idx, cand in enumerate(candidates):
+        if tried >= max_try:
+            break
+        tried += 1
+        # A Java class whose name is not `Main` will not compile in the runtime
+        # image, which surfaces as an opaque SE. Normalise before testing.
+        if lang == "java" and "class Main" not in cand:
+            c = _re.sub(r"public\s+class\s+\w+", "public class Main", cand)
+            if "class Main" not in c:
+                c = _re.sub(r"class\s+\w+", "class Main", c, count=1)
+            cand = c
+        try:
+            payload = {
+                "id": f"validate_{_re.sub(r'[^A-Za-z0-9]+', '_', pname)}_{lang}_{idx}",
+                "language": lang,
+                "approach": "baseline",
+                "source": cand,
+                "test_cases": testcases,
+            }
+            r = requests.post(SUBMIT_ENDPOINT, json=payload, timeout=120)
+            d = r.json()
+        except Exception as e:
+            print(f"    [VALIDATE] {pname}/{lang} candidate {idx}: request error {e}")
+            continue
+        if d.get("verdict") == "AC":
+            print(f"    [VALIDATE] {pname}/{lang}: candidate {idx} PASSES (of {tried} tried)")
+            return cand
+        print(f"    [VALIDATE] {pname}/{lang} candidate {idx}: {d.get('verdict')} -> trying next")
+    return None
+
 
 def build_benchmark_corpus():
     """
@@ -127,19 +186,24 @@ def build_benchmark_corpus():
             langs = sols.get("language", [])
             codes = sols.get("solution", [])
             
-            # Map solutions by language: 2=CPP, 3=Python3 (or 1=Python), 4=Java
+            # Collect EVERY candidate per language: 2=CPP, 3=Python3 (or 1=Python), 4=Java.
+            # code_contests is crowd-sourced, so the first solution for a language
+            # is frequently wrong or non-compiling. We validate candidates against
+            # the problem's own public test and keep the first that actually passes.
             lang_solutions = {}
             for l_id, code in zip(langs, codes):
-                if l_id == 2 and "cpp" not in lang_solutions and len(code.strip()) > 20:
-                    lang_solutions["cpp"] = code
-                elif (l_id == 3 or l_id == 1) and "python" not in lang_solutions and len(code.strip()) > 20:
-                    lang_solutions["python"] = code
-                elif l_id == 4 and "java" not in lang_solutions and len(code.strip()) > 20:
+                if not code or len(code.strip()) <= 20:
+                    continue
+                if l_id == 2:
+                    lang_solutions.setdefault("cpp", []).append(code)
+                elif l_id in (1, 3):
+                    lang_solutions.setdefault("python", []).append(code)
+                elif l_id == 4:
                     import re
                     jcode = re.sub(r"public\s+class\s+\w+", "public class Main", code)
                     if "class Main" not in jcode:
                         jcode = re.sub(r"class\s+\w+", "class Main", jcode, count=1)
-                    lang_solutions["java"] = jcode
+                    lang_solutions.setdefault("java", []).append(jcode)
             
             found_problems[pname] = {
                 "meta": hf_problems[pname],
@@ -158,7 +222,11 @@ def build_benchmark_corpus():
         meta = data["meta"]
         testcases = [{"input": data["input"], "expected": data["expected"]}]
         
-        for lang, source in data["solutions"].items():
+        for lang, candidates in data["solutions"].items():
+            source = validate_solution(pname, lang, candidates, testcases)
+            if source is None:
+                print(f"  [SKIP] {pname} / {lang}: no candidate solution passed its own test")
+                continue
             corpus.append({
                 "problem_id": meta["p_id"],
                 "problem_name": pname,
@@ -434,37 +502,16 @@ def run_empirical_evaluations(corpus):
                     used_mb = peak_bytes / (1024.0 * 1024.0)
                     
                     # Compute allocated memory based on tier
-                    if strat == "baseline":
-                        alloc_mb = 2048.0
+                    heavy_start = strat == "baseline" or (strat == "predictive" and is_heavy)
+                    promoted = strat in ("reactive", "hybrid") and tier_promoted
+                    if heavy_start or promoted or (strat == "hybrid" and is_heavy):
+                        alloc_mb = float(BASELINE_TIER_MB if not promoted else PROMOTED_TIER_MB)
                         alloc_cores = 2.0
                         cpu_shares = 2048
-                    elif strat == "predictive":
-                        if is_heavy:
-                            alloc_mb = 2048.0
-                            alloc_cores = 2.0
-                            cpu_shares = 2048
-                        else:
-                            alloc_mb = 128.0
-                            alloc_cores = 1.0
-                            cpu_shares = 1024
-                    elif strat == "reactive":
-                        if tier_promoted:
-                            alloc_mb = 2048.0
-                            alloc_cores = 2.0
-                            cpu_shares = 2048
-                        else:
-                            alloc_mb = 128.0
-                            alloc_cores = 1.0
-                            cpu_shares = 1024
-                    elif strat == "hybrid":
-                        if is_heavy or tier_promoted:
-                            alloc_mb = 2048.0
-                            alloc_cores = 2.0
-                            cpu_shares = 2048
-                        else:
-                            alloc_mb = 128.0
-                            alloc_cores = 1.0
-                            cpu_shares = 1024
+                    else:
+                        alloc_mb = float(LIGHT_TIER_MB)
+                        alloc_cores = 1.0
+                        cpu_shares = 1024
                             
                     wasted_mb = max(0.0, alloc_mb - used_mb)
                     wasted_pct = (wasted_mb / alloc_mb) * 100.0
@@ -751,12 +798,32 @@ def export_summaries(all_completed):
     print(f"[OUTPUT] Saved detailed language breakdown to: {lang_csv}")
     
     # 3. Real-Time Cloud Provisioning Comparison Table
+    # Every figure below is derived from LIGHT_TIER_MB / BASELINE_TIER_MB and
+    # the c6i.4xlarge instance, not transcribed. Packing assumes the same 87.5%
+    # host-utilisation ceiling the baseline row used (14 pods x 2048 MiB of
+    # 32 GB), so the two densities are directly comparable.
+    instance_ram_mb = CLOUD_INSTANCE["ram_gb"] * 1024
+    packing_usable_mb = int(instance_ram_mb * 0.875)   # 28,672 MiB
+    price = CLOUD_INSTANCE["hourly_cost_usd"]
+    base_pods_per_vm = packing_usable_mb // BASELINE_TIER_MB      # 14
+    adapt_pods_per_vm = packing_usable_mb // LIGHT_TIER_MB        # 112 @ 256 MiB
+    burst = 500
+    base_vms = -(-burst // base_pods_per_vm)                      # ceil
+    adapt_vms = -(-burst // adapt_pods_per_vm)
+    base_cost = base_vms * price
+    adapt_cost = adapt_vms * price
+    cost_saved = base_cost - adapt_cost
+    cost_cut_pct = cost_saved / base_cost * 100.0
+    vm_cut_pct = (base_vms - adapt_vms) / base_vms * 100.0
+    pod_mem_ratio = BASELINE_TIER_MB / LIGHT_TIER_MB
+    density_ratio = adapt_pods_per_vm / base_pods_per_vm
+
     cloud_rows = [
         {
             "Provisioning_Dimension": "Default Per-Pod Memory Reservation",
-            "Static_Baseline_Cloud": "2048 MiB",
-            "RAAS_OCJS_Adaptive_Cloud": "128 MiB",
-            "Cloud_Efficiency_Gain": "16.0x reduction in baseline pod memory"
+            "Static_Baseline_Cloud": f"{BASELINE_TIER_MB} MiB",
+            "RAAS_OCJS_Adaptive_Cloud": f"{LIGHT_TIER_MB} MiB",
+            "Cloud_Efficiency_Gain": f"{pod_mem_ratio:.1f}x reduction in baseline pod memory"
         },
         {
             "Provisioning_Dimension": "Default Per-Pod CPU Reservation",
@@ -765,22 +832,22 @@ def export_summaries(all_completed):
             "Cloud_Efficiency_Gain": "2.0x reduction in baseline CPU reservation"
         },
         {
-            "Provisioning_Dimension": "Max Pod Packing Density (c6i.4xlarge, 32 GB)",
-            "Static_Baseline_Cloud": "14 concurrent pods",
-            "RAAS_OCJS_Adaptive_Cloud": "128 to 200+ concurrent pods",
-            "Cloud_Efficiency_Gain": "9.1x to 14.3x higher container density per VM"
+            "Provisioning_Dimension": f"Max Pod Packing Density ({CLOUD_INSTANCE['name']}, {CLOUD_INSTANCE['ram_gb']} GB)",
+            "Static_Baseline_Cloud": f"{base_pods_per_vm} concurrent pods",
+            "RAAS_OCJS_Adaptive_Cloud": f"{adapt_pods_per_vm} concurrent pods",
+            "Cloud_Efficiency_Gain": f"{density_ratio:.1f}x higher container density per VM"
         },
         {
-            "Provisioning_Dimension": "VM Fleet Size for 500-Sub Burst",
-            "Static_Baseline_Cloud": "36 VMs (504 slots)",
-            "RAAS_OCJS_Adaptive_Cloud": "4 VMs (512+ slots)",
-            "Cloud_Efficiency_Gain": "88.9% reduction in active cloud VMs"
+            "Provisioning_Dimension": f"VM Fleet Size for {burst}-Sub Burst",
+            "Static_Baseline_Cloud": f"{base_vms} VMs ({base_pods_per_vm} slots each)",
+            "RAAS_OCJS_Adaptive_Cloud": f"{adapt_vms} VMs ({adapt_pods_per_vm}+ slots each)",
+            "Cloud_Efficiency_Gain": f"{vm_cut_pct:.1f}% reduction in active cloud VMs"
         },
         {
-            "Provisioning_Dimension": "Cluster Hourly Cost (AWS @ USD 0.68/hr)",
-            "Static_Baseline_Cloud": "USD 24.48 / hour",
-            "RAAS_OCJS_Adaptive_Cloud": "USD 2.72 / hour",
-            "Cloud_Efficiency_Gain": "USD 21.76 / hour savings (88.9% cost cut)"
+            "Provisioning_Dimension": f"Cluster Hourly Cost (AWS @ USD {price:.2f}/hr)",
+            "Static_Baseline_Cloud": f"USD {base_cost:.2f} / hour",
+            "RAAS_OCJS_Adaptive_Cloud": f"USD {adapt_cost:.2f} / hour",
+            "Cloud_Efficiency_Gain": f"USD {cost_saved:.2f} / hour savings ({cost_cut_pct:.1f}% cost cut)"
         },
         {
             "Provisioning_Dimension": "Total Contest RAM Reserved (10,000 Subs)",
@@ -806,7 +873,8 @@ def run_burst_stress(empirical_runs):
     """
     Simulates a high-intensity 500-submission freeze rush arriving in 30 seconds
     on the host hardware: Intel i5-13420H (12 threads) with 15 GiB physical RAM.
-    Evaluates queue wait, E2E turnaround, and drain times with 128 MB Low tier.
+    Evaluates queue wait, E2E turnaround, and drain times with the deployed
+    {LIGHT_TIER_MB} MB Low tier.
     """
     print("\n=== HIGH-INTENSITY CONTEST FREEZE BURST SIMULATION (N=500, 30s) ===")
     N_BURST = 500
@@ -832,13 +900,19 @@ def run_burst_stress(empirical_runs):
     # Safe limits on 15 GiB RAM (15,360 MB):
     # Baseline: 7 slots (7 * 2048 MB = 14,336 MB safe capacity)
     # Baseline Overcommit: 14 slots (14 * 2048 MB = 28,672 MB, 186% overcommit)
-    # RAAS-OCJS Adaptive (128 MB tier): 42 slots (42 * 128 MB = 5,376 MB = 35.0% host RAM, leaving 10.0 GiB headroom)
+    # RAAS-OCJS Adaptive: ADAPTIVE_SLOTS = floor(usable_ram / LIGHT_TIER_MB), derived below
+    #   from HOST_SPECS so the slot count tracks the real tier rather than a constant.
+    # Safe adaptive concurrency: how many LIGHT_TIER_MB containers fit in the
+    # host's RAM once the OS reserve is subtracted.
+    usable_mb = HOST_SPECS["total_ram_mb"] - HOST_SPECS["os_reserved_mb"]
+    ADAPTIVE_SLOTS = max(1, int(usable_mb // LIGHT_TIER_MB))
+    print(f"[INFO] Adaptive slots = floor({usable_mb} MiB usable / {LIGHT_TIER_MB} MiB tier) = {ADAPTIVE_SLOTS}")
     scenarios = [
         ("Baseline (Safe 7 Slots)", "baseline", 7),
         ("Baseline (Overcommitted 14 Slots)", "baseline", 14),
-        ("Predictive (Adaptive 42 Slots)", "predictive", 42),
-        ("Reactive (Adaptive 42 Slots)", "reactive", 42),
-        ("Hybrid (Adaptive 42 Slots)", "hybrid", 42)
+        (f"Predictive (Adaptive {ADAPTIVE_SLOTS} Slots)", "predictive", ADAPTIVE_SLOTS),
+        (f"Reactive (Adaptive {ADAPTIVE_SLOTS} Slots)", "reactive", ADAPTIVE_SLOTS),
+        (f"Hybrid (Adaptive {ADAPTIVE_SLOTS} Slots)", "hybrid", ADAPTIVE_SLOTS)
     ]
     
     burst_results = []
@@ -870,7 +944,7 @@ def run_burst_stress(empirical_runs):
         waits = [c["wait_ms"] for c in completed]
         turns = [c["turnaround_ms"] for c in completed]
         e2e_times = [c["e2e_request_to_verdict_ms"] for c in completed]
-        peak_ram_mb = slots * (2048.0 if strat == "baseline" else 128.0)
+        peak_ram_mb = slots * (float(BASELINE_TIER_MB) if strat == "baseline" else float(LIGHT_TIER_MB))
         drain_time = max(c["arrival_s"] + c["turnaround_ms"]/1000.0 for c in completed)
         
         row = {
@@ -887,7 +961,7 @@ def run_burst_stress(empirical_runs):
             "Burst_Drain_Time_s": round(drain_time, 1)
         }
         burst_results.append(row)
-        print(f"  {label:35s} | Slots: {slots:2d} | Avg Wait: {row['Avg_Queue_Wait_ms']:7.1f} ms | P95 Turnaround: {row['P95_Turnaround_ms']:7.1f} ms | Drain: {row['Burst_Drain_Time_s']:5.1f}s")
+        print(f"  {label:35s} | Slots: {int(slots):2d} | Avg Wait: {row['Avg_Queue_Wait_ms']:7.1f} ms | P95 Turnaround: {row['P95_Turnaround_ms']:7.1f} ms | Drain: {row['Burst_Drain_Time_s']:5.1f}s")
         
     burst_csv = "benchmarks/real_dataset_burst_stress.csv"
     with open(burst_csv, "w", newline="") as f:

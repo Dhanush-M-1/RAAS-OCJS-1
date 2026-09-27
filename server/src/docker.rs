@@ -7,22 +7,46 @@ use tokio::io::{self, AsyncWriteExt};
 use tokio::process::Command;
 
 /// Hard memory limit (bytes) for a Low-tier container.
-pub const LOW_MEM_HARD_LIMIT: u64 = 256 * 1024 * 1024; // 256 MiB
+///
+/// The shipped configuration is 256 MiB. `LOW_TIER_MB` exists so the tier can
+/// be re-sized for the boundary experiments in Section VI without a code edit;
+/// it is an experimental knob, and the default is the value we deploy.
+///
+/// NOTE: this must stay the *single* source of truth. The `--memory` flag
+/// passed to `docker run` is derived from this value rather than hardcoded,
+/// because previously the const and the flag were separate and could drift.
+pub const LOW_MEM_HARD_LIMIT_DEFAULT_MB: u64 = 256;
 
 /// Soft watermark as a percentage of the hard limit (tunable).
 pub const HIGH_WATERMARK_PCT: u64 = 70;
 
-/// Soft memory watermark (bytes) written to `memory.high` for a Low-tier start.
-/// Derived as 70% of `LOW_MEM_HARD_LIMIT` (~179.2 MiB).
+/// Hard memory limit in bytes, resolved once from `LOW_TIER_MB` (default 256).
+pub fn low_mem_hard_limit() -> u64 {
+    static LIMIT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        let mb = std::env::var("LOW_TIER_MB")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(LOW_MEM_HARD_LIMIT_DEFAULT_MB);
+        eprintln!("[config] LOW_TIER_MB: low tier hard limit = {mb} MiB");
+        mb * 1024 * 1024
+    })
+}
+
+/// Soft memory watermark (bytes) written to `memory.high` for a Low-tier start:
+/// `HIGH_WATERMARK_PCT` of the hard limit (179.2 MiB at the default 256 MiB).
 ///
-/// Docker's `--memory=256m` sets `memory.max` (the hard OOM boundary) but does
-/// *not* set `memory.high`. The kernel only counts `high` pressure events when
+/// Docker's `--memory` sets `memory.max` (the hard OOM boundary) but does *not*
+/// set `memory.high`. The kernel only counts `high` pressure events when
 /// `memory.high` is configured, so the judge writes this watermark itself. It
-/// sits below the hard limit, giving the reactive monitor a chance to
-/// promote a heavy submission *before* it can be OOM-killed while allowing
-/// submissions that fit within ~70% of the tier to complete without promotion.
-pub const LOW_MEM_HIGH_WATERMARK: u64 =
-    LOW_MEM_HARD_LIMIT * HIGH_WATERMARK_PCT / 100; // ~179.2 MiB (187,904,819 bytes)
+/// sits below the hard limit, giving the reactive monitor a chance to promote a
+/// heavy submission *before* it can be OOM-killed while allowing submissions
+/// that fit within ~70% of the tier to complete without promotion.
+pub fn low_mem_high_watermark() -> u64 {
+    static WM: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *WM.get_or_init(|| low_mem_hard_limit() * HIGH_WATERMARK_PCT / 100)
+}
 
 /// How often the monitor re-reads the cgroup files while a test case runs.
 /// Reading a cgroup file is sub-millisecond; `memory.events` counters are
@@ -109,7 +133,10 @@ fn get_tier_limits(tier: &Tier) -> Vec<String> {
     match tier {
         // Low starts bounded (1 CPU / 256 MiB). `Tier::High` is unlimited today,
         // which is also the ceiling Reactive/Hybrid promote to (see moderator.rs).
-        Tier::Low => vec!["--cpus=1".to_string(), "--memory=256m".to_string()],
+        Tier::Low => vec![
+            "--cpus=1".to_string(),
+            format!("--memory={}m", low_mem_hard_limit() / (1024 * 1024)),
+        ],
         _ => vec![],
     }
 }
@@ -135,7 +162,7 @@ fn allocated_for(promoted: bool, tier: Tier) -> u64 {
     if promoted || tier == Tier::High {
         0
     } else {
-        LOW_MEM_HARD_LIMIT
+        low_mem_hard_limit()
     }
 }
 
@@ -238,10 +265,10 @@ async fn run_case_monitored(
                         let high_crossed = last_high.map_or(false, |prev| high > prev);
                         last_high = Some(high);
 
-                        let crossed = high_crossed || cur >= LOW_MEM_HIGH_WATERMARK;
+                        let crossed = high_crossed || cur >= low_mem_high_watermark();
                         if crossed {
                             let signal =
-                                MonitorSignal::new(cur, LOW_MEM_HIGH_WATERMARK, true);
+                                MonitorSignal::new(cur, low_mem_high_watermark(), true);
                             if policy.should_promote(&signal) {
                                 let _ = cg.promote_to_unlimited();
                                 let _ = Command::new("docker")
@@ -272,9 +299,9 @@ async fn run_case_monitored(
                                 if cur > case_peak {
                                     case_peak = cur;
                                 }
-                                if cur >= LOW_MEM_HIGH_WATERMARK {
+                                if cur >= low_mem_high_watermark() {
                                     let signal =
-                                        MonitorSignal::new(cur, LOW_MEM_HIGH_WATERMARK, true);
+                                        MonitorSignal::new(cur, low_mem_high_watermark(), true);
                                     if policy.should_promote(&signal) {
                                         let _ = Command::new("docker")
                                             .args(["update", container, "--memory", "0", "--memory-swap", "-1", "--cpus", "0"])
@@ -402,7 +429,7 @@ async fn submission_inner(
             // Arm the soft watermark so a Low-tier start can emit pressure
             // events (only meaningful when this policy can promote).
             if can_promote && *tier == Tier::Low {
-                if let Err(e) = cg.set_memory_high(LOW_MEM_HIGH_WATERMARK) {
+                if let Err(e) = cg.set_memory_high(low_mem_high_watermark()) {
                     eprintln!(
                         "[moderator] failed to arm memory.high for {container}: {e}"
                     );

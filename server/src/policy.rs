@@ -92,7 +92,7 @@ mod tests {
     use super::*;
 
     fn sig(crossed_high: bool) -> MonitorSignal {
-        MonitorSignal::new(200 * 1024 * 1024, crate::docker::LOW_MEM_HIGH_WATERMARK, crossed_high)
+        MonitorSignal::new(200 * 1024 * 1024, crate::docker::low_mem_high_watermark(), crossed_high)
     }
 
     fn sub(language: &str, source: &str) -> Submission {
