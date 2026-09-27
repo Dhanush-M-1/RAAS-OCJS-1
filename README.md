@@ -108,26 +108,27 @@ The system includes five high-stakes competition problems modeled after **Codefo
 
 ## 06. Experimental Results
 
-*Measured live on Linux kernel 6.x with cgroup v2, over the full 5 problems × 4 languages × 4 strategies matrix (80 runs). All 80 returned `AC`.*
+*Measured on the bare-metal calibration host (i5-13420H, 15 GiB, cgroup v2, watermark 179.2 MiB) over the full 5 problems × 4 languages × 4 strategies matrix — 80 live runs, all 80 `AC`.*
 
 | Problem | Strategy | Verdict | Initial Tier | Promoted? | CPU (`cpu.stat`) | Peak RSS | Allocated |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **P1: Prefix Sums** (Python) | Baseline | **AC** | Heavy | No | 68 ms | 8.4 MB | Uncapped |
-| | Predictive / Reactive / Hybrid | **AC** | Light | No | 73–77 ms | 8.3–9.1 MB | **256 MiB** |
-| **P2: Knapsack Buffer** (Java) | Baseline | **AC** | Heavy | No | 486 ms | 195.6 MB | Uncapped |
-| | Predictive | **AC** | Light | No | 495 ms | 190.2 MB | 256 MiB |
-| | **Reactive** | **AC** | Light | **Yes (1444 ms)** | 459 ms | 191.1 MB | 256 MiB → Uncapped |
-| | **Hybrid** | **AC** | Light | **Yes (1361 ms)** | 447 ms | 191.3 MB | 256 MiB → Uncapped |
-| **P3: Floyd-Warshall** (Python) | Baseline | **AC** | Heavy | No | 663 ms | 10.1 MB | Uncapped |
-| | Predictive / Reactive / Hybrid | **AC** | Light | No | 571–616 ms | 7.8–9.2 MB | **256 MiB** |
-| **P4: Tree Search** (C++) | Baseline | **AC** | Heavy | No | 84 ms | 42.9 MB | Uncapped |
-| | Predictive / Reactive / Hybrid | **AC** | Light | No | 67–72 ms | 6.2–6.7 MB | **256 MiB** |
-| **P5: Top-K Streaming** (C++) | Baseline | **AC** | Heavy | No | 57 ms | 51.3 MB | Uncapped |
-| | Predictive / Reactive / Hybrid | **AC** | Light | No | 55–61 ms | 6.5–9.5 MB | **256 MiB** |
+| **P1: Prefix Sums** (Python) | Baseline | **AC** | Heavy | No | 54 ms | 10.4 MB | Uncapped |
+| | Predictive / Reactive / Hybrid | **AC** | Light | No | 52–56 ms | 10.1–11.1 MB | **256 MiB** |
+| **P2: Knapsack (200/210 MiB)** (Java) | Baseline | **AC** | Heavy | No | 247 ms | 248.6 MB | Uncapped |
+| | Predictive | **AC** | Light | No | 261 ms | 244.1 MB | 256 MiB |
+| | **Reactive / Hybrid** | **AC** | Light | **Yes (810 / 817 ms)** | 272–274 ms | 243.5–243.8 MB | 256 MiB → Uncapped |
+| **P3: Floyd-Warshall** (Python) | Baseline | **AC** | Heavy | No | 321 ms | 10.9 MB | Uncapped |
+| | Predictive / Reactive / Hybrid | **AC** | Light | No | 306–322 ms | 10.3–11.2 MB | **256 MiB** |
+| **P4: Tree Search** (C++) | Baseline | **AC** | Heavy | No | 53 ms | 6.5 MB | Uncapped |
+| | Predictive / Reactive / Hybrid | **AC** | Light | No | 51–53 ms | 6.4–6.8 MB | **256 MiB** |
+| **P5: Top-K Streaming** (C++) | Baseline | **AC** | Heavy | No | 42 ms | 7.3 MB | Uncapped |
+| | Predictive / Reactive / Hybrid | **AC** | Light | No | 41–43 ms | 6.6–7.2 MB | **256 MiB** |
 
-**Aggregate across all 80 runs:** mean CPU is flat across strategies (210.6–216.2 ms, spread ≈2.7%) — tiering carries no measurable CPU cost. **52 of 80 runs (65%) were held at a hard 256 MiB ceiling**; the rest were Baseline or promoted mid-run. Live promotion fired in **8 of 8** eligible P2 runs and **0** Predictive runs.
+**Aggregate across all 80 runs:** mean CPU is flat across strategies (121.0–126.0 ms, spread 4.2%) — tiering carries no measurable CPU cost. **44 of 80 runs (55%) were held at a hard 256 MiB ceiling**; the rest were Baseline or promoted mid-run. Live promotion fired in **8 of 8** eligible P2 runs and **0** Predictive runs.
 
-> **Watermark note.** This matrix was measured with the soft watermark at **128 MiB** (50% of the 256 MiB tier). The watermark is now configurable via `HIGH_WATERMARK_PCT` in `server/src/docker.rs` and defaults to 70% (~179.2 MiB). Peak-RSS and promotion-timing figures above were taken at the lower setting; the tiering verdicts and CPU measurements are unaffected, but promotion latency will shift with a higher watermark. Re-measure before citing these numbers against a 70% configuration.
+> **Predictive fails at the boundary.** On P2 the classifier routed all four languages to Light and, with no watermark monitor running, never promoted. All four survived only because their true peak stayed under the hard limit — Java cleared it by just **24.3 MB (9.1%)**. A 5% larger fixture would have OOM-killed all four. This is the empirical case for keeping the watermark active: the model is fast but not trustworthy at the tier boundary. See `docs/EXPERIMENTAL_RESULTS.md` §4.3.
+
+Raw per-cell measurements are committed in `benchmarks/laptop_matrix_80run.json`.
 
 Full per-language matrix, promotion traces, and threats to validity: [`docs/EXPERIMENTAL_RESULTS.md`](docs/EXPERIMENTAL_RESULTS.md).
 

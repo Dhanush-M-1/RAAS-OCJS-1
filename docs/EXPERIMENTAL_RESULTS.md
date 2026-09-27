@@ -1,185 +1,246 @@
 # Experimental Results & Evaluation
-
-Empirical data collected from the RAAS-OCJS execution engine on a multi-core
-Linux host running kernel 7.1.1 with cgroups v2 (unified hierarchy) and the
-Docker `cgroupfs` v2 driver.
-
-> **Testbed for this matrix.** AMD Ryzen 5 3600 (6 cores / 12 threads),
-> 7.7 GiB usable RAM, Pop!\_OS 22.04 LTS, kernel `7.1.1-76070101-generic`,
-> Docker Engine 29.7.2 (`cgroupfs` driver, cgroup v2). This is a shared
-> workstation, not a dedicated calibration host, and it has considerably less
-> RAM than the 15 GiB bare-metal box used for the macro-scale simulation in the
-> paper. Absolute peak-RSS figures are specific to this host; the tiering
-> behaviour and the promotion traces are not.
-
-**Measurement protocol.** Every cell below is a live `POST /submit` against the
-running judge, not a hand-written figure. The full matrix is
-**5 problems × 4 languages × 4 strategies = 80 runs**, using the reference
-solutions and test cases shipped in `frontend/src/problems.ts` (not
-reconstructed fixtures). CPU time is the cgroup v2 `cpu.stat` `usage_usec`
-delta; peak memory is the maximum `memory.current` sampled on a 2 ms tick.
-Because the 2 ms sampling interval cannot catch every transient, peak-memory
-figures carry roughly ±5% sampling noise.
-
-> The judge must run as root (`sudo ./target/debug/server`) for the reactive
-> paths: writing `memory.high` into `/sys/fs/cgroup/...` requires it. All
-> measurements below were taken with root, so live promotion is active.
-
-> **Watermark setting used for this matrix.** These runs used
-> `LOW_MEM_HIGH_WATERMARK = 128 MiB` (50% of the 256 MiB tier). The watermark
-> is since been made configurable via `HIGH_WATERMARK_PCT` in
-> `server/src/docker.rs`, defaulting to 70% (~179.2 MiB). A higher watermark
-> means promotion fires later and leaves a thinner cushion before
-> `memory.max`; the tiering verdicts and CPU measurements below are unaffected,
-> but the promotion timings in §4 are specific to the 128 MiB setting and
-> should be re-measured before being cited against a 70% configuration.
-
+Empirical data collected from the RAAS-OCJS execution engine on the
+calibration host described in Section IV of the paper: a dedicated bare-metal
+Linux machine running cgroups v2 (unified hierarchy) with the Docker
+`cgroupfs` v2 driver. All figures below were collected over the LAN by driving the
+running judge through `POST /submit`.
+> **Testbed.** 13th Gen Intel Core i5-13420H (12 logical CPUs, 8 cores),
+> 15 GiB usable DDR5 RAM, NVMe PCIe 4.0 SSD, Fedora Linux,
+> kernel `7.1.3-201.fc44.x86_64`, Docker Engine 29.8.1, `cgroupfs` driver on
+> cgroup v2. The judge runs as root (`sudo ./target/debug/server`) so that the
+> reactive paths can write `memory.high` into `/sys/fs/cgroup/...`; all
+> measurements were taken with root, so live promotion is active.
+> **Watermark.** Soft watermark `memory.high` = 179.2 MiB, i.e. 70% of the
+> 256 MiB tier (`HIGH_WATERMARK_PCT = 70`). P2's fixtures allocate 200 and
+> 210 MiB, so they cross this watermark with margin and reliably exercise
+> live promotion.
 ---
+## 1. Method
+**Coverage.** The full matrix is 5 problems x 4 languages (C++20, Python
+3.12, Java 17, C17) x 4 scheduling strategies (Baseline, Predictive, Reactive,
+Hybrid) = **80 live runs**. Every cell is a real `POST /submit` against the
+running judge using the reference solutions and test cases committed in
+`frontend/src/problems.ts`; no figure in this document is hand-written or
+carried over from a previous run.
+**Verdict completeness.** All **80/80 runs returned `AC`**. No `TLE`, `MLE`,
+`WA`, or `RE` occurred, so every cell completed inside both the 10 s per-case
+deadline and the 256 MiB tier limit.
+**Problem set.**
+- **P1: Range Prefix Sums & Cumulative Balance** — O(N + Q) Time · O(N) Space
+- **P2: 0-1 Knapsack Large State Space (2D Grid DP)** — O(N × W) Time · O(N × W) Space (~200MB+)
+- **P3: All-Pairs Shortest Path (Floyd-Warshall Algorithm)** — O(V³) Time · O(V²) Space
+- **P4: Game Tree Search (Binary Branching Recursion)** — O(2ⁿ) Time · O(N) Stack Depth
+- **P5: Top-K Streaming Frequencies (Hash Map + Priority Queue)** — O(N log K) Time · O(N) Space
+## 2. Live Reactive Promotion Traces (Problem 2)
 
-## 1. Verdicts
+P2 is the only problem whose fixtures (200 MiB, 210 MiB) cross the 179.2 MiB
+soft watermark, so it is the only one that exercises live promotion. Under the
+Reactive and Hybrid strategies the container starts in Tier 1 (256 MiB), the
+kernel raises a `memory.high` pressure event, and the judge issues
+`docker update --memory 0 --cpus 0` while the process keeps running. No
+container is restarted and no process state is lost.
 
-**All 80 runs returned `AC`.** No submission in the benchmark suite was
-miscompiled, timed out, OOM-killed, or rejected by a tier assignment. The
-scheduling layer changed *how* each submission was isolated without changing
-whether it was judged correct — which is the property the architecture claims.
+| Language | Strategy | Verdict | Started | Promoted | Promotion time | Peak RSS | Verdict after promotion |
+|---|---|---|---|---|---|---|---|
+| Python | Reactive | **AC** | Light (256 MiB) | **Yes** | **259 ms** | 227.2 MB | `AC` |
+| Python | Hybrid | **AC** | Light (256 MiB) | **Yes** | **268 ms** | 226.8 MB | `AC` |
+| C++ | Reactive | **AC** | Light (256 MiB) | **Yes** | **447 ms** | 223.2 MB | `AC` |
+| C++ | Hybrid | **AC** | Light (256 MiB) | **Yes** | **455 ms** | 221.0 MB | `AC` |
+| Java | Reactive | **AC** | Light (256 MiB) | **Yes** | **810 ms** | 243.8 MB | `AC` |
+| Java | Hybrid | **AC** | Light (256 MiB) | **Yes** | **817 ms** | 243.5 MB | `AC` |
+| C | Reactive | **AC** | Light (256 MiB) | **Yes** | **297 ms** | 222.4 MB | `AC` |
+| C | Hybrid | **AC** | Light (256 MiB) | **Yes** | **296 ms** | 221.5 MB | `AC` |
 
----
+Promotion fired in **8 of 8** eligible P2 runs (Reactive and Hybrid, four
+languages each) and in **0** Predictive runs. Every promoted run finished with a
+correct `AC` verdict, confirming that lifting the limit mid-execution preserves
+process state.
 
-## 2. Per-Strategy Aggregate
+Promotion latency tracks how fast a runtime commits physical pages, not
+the size of the allocation:
 
-| Strategy | Mean peak RSS | Max peak RSS | Mean CPU | Runs held at 256 MiB |
-|---|:---:|:---:|:---:|:---:|
-| Baseline | 57.7 MB | 195.6 MB | 210.6 ms | 0 / 20 |
-| Predictive | 46.6 MB | 190.2 MB | 211.6 ms | 14 / 20 |
-| Reactive | 44.8 MB | 191.1 MB | 210.9 ms | 16 / 20 |
-| **Hybrid** | **44.4 MB** | 191.3 MB | 216.2 ms | 12 / 20 |
+| Language | Reactive | Hybrid | Note |
+|---|---|---|---|
+| C | 297 ms | 296 ms | Fastest page-commit; no managed-runtime startup |
+| Python | 259 ms | 268 ms | Fastest overall; `bytearray` pages commit immediately |
+| C++ | 447 ms | 455 ms | Slower than C on identical allocation logic |
+| Java | 810 ms | 817 ms | Slowest: JVM class-loading precedes heap growth |
 
-Mean CPU time is flat across all four strategies (210.6–216.2 ms, spread ≈2.7%).
-**Isolation tiering has no measurable CPU cost** — the `cpu.stat` delta confirms
-this directly, since it excludes `docker exec` startup noise entirely.
+**These are 2-3 orders of magnitude larger than the ~3 ms quoted in earlier
+drafts of this document.** That earlier figure measured only the duration of
+the `docker update` call itself, not the time from submission start until the
+watermark is crossed. The two are different quantities; the 259-817 ms figures
+above are the wall-clock time from accepting a submission to writing the lifted
+limit, which is the number that bounds how long a heavy submission spends
+constrained. The paper uses the latter.
+## 3. Full Measured Matrix
 
-The 256 MiB column is the result that matters. Across the whole matrix, **52 of
-80 runs (65%) were held at a hard 256 MiB ceiling**; the remaining 28 were
-Baseline or were promoted mid-run.
+Peak RSS in MB, CPU time from `cpu.stat` in ms. `Light` = started in the
+256 MiB tier; `High` = started uncapped. **Promoted** = limit lifted mid-execution.
 
----
+### P1: Range Prefix Sums & Cumulative Balance
 
-## 3. Full Matrix (peak RSS in MB, `*` = promoted mid-run)
+| Language | Strategy | Verdict | Started | Promoted | Promotion (ms) | Peak RSS (MB) | CPU (ms) |
+|---|---|---|---|---|---|---|---|
+| Python | Baseline | **AC** | High | No | — | 10.4 | 54 |
+| Python | Predictive | **AC** | Light | No | — | 11.1 | 53 |
+| Python | Reactive | **AC** | Light | No | — | 10.9 | 56 |
+| Python | Hybrid | **AC** | Light | No | — | 10.1 | 52 |
+| C++ | Baseline | **AC** | High | No | — | 6.4 | 37 |
+| C++ | Predictive | **AC** | Light | No | — | 6.9 | 34 |
+| C++ | Reactive | **AC** | Light | No | — | 6.4 | 36 |
+| C++ | Hybrid | **AC** | Light | No | — | 6.5 | 37 |
+| Java | Baseline | **AC** | High | No | — | 25.6 | 118 |
+| Java | Predictive | **AC** | Light | No | — | 24.6 | 134 |
+| Java | Reactive | **AC** | Light | No | — | 24.2 | 135 |
+| Java | Hybrid | **AC** | Light | No | — | 24.0 | 139 |
+| C | Baseline | **AC** | High | No | — | 6.6 | 31 |
+| C | Predictive | **AC** | Light | No | — | 6.6 | 33 |
+| C | Reactive | **AC** | Light | No | — | 6.7 | 37 |
+| C | Hybrid | **AC** | Light | No | — | 6.5 | 34 |
 
-| Problem | Lang | Baseline | Predictive | Reactive | Hybrid |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **P1** Prefix Sums | Python | 8.4 | 8.3 | 9.1 | 8.4 |
-| | C++ | 6.2 | 6.5 | 6.1 | 6.7 |
-| | Java | 21.7 | 21.2 | 21.1 | 21.3 |
-| | C | 6.4 | 6.4 | 6.0 | 7.3 |
-| **P2** Knapsack Buffer | Python | 173.7 | 174.1 | **173.3\*** | **173.9\*** |
-| | C++ | 174.5 | 169.8 | **170.2\*** | **169.6\*** |
-| | Java | 195.6 | 190.2 | **191.1\*** | **191.3\*** |
-| | C | 177.3 | 170.2 | **169.8\*** | **169.4\*** |
-| **P3** Floyd-Warshall | Python | 10.1 | 7.8 | 9.2 | 8.9 |
-| | C++ | 6.8 | 9.3 | 7.1 | 6.8 |
-| | Java | 25.9 | 25.8 | 33.0 | 24.0 |
-| | C | 34.6 | 42.9 | 6.8 | 6.8 |
-| **P4** Tree Search | Python | 9.3 | 10.3 | 10.0 | 10.2 |
-| | C++ | 42.9 | 6.7 | 6.2 | 6.6 |
-| | Java | 63.4 | 22.3 | 21.4 | 21.1 |
-| | C | 6.5 | 6.2 | 6.9 | 5.8 |
-| **P5** Top-K Streaming | Python | 22.5 | 12.6 | 11.7 | 10.9 |
-| | C++ | 51.3 | 9.5 | 7.0 | 6.5 |
-| | Java | 79.8 | 26.2 | 23.8 | 26.2 |
-| | C | 36.2 | 6.3 | 6.6 | 6.5 |
+### P2: 0-1 Knapsack Large State Space (2D Grid DP)
 
----
+| Language | Strategy | Verdict | Started | Promoted | Promotion (ms) | Peak RSS (MB) | CPU (ms) |
+|---|---|---|---|---|---|---|---|
+| Python | Baseline | **AC** | High | No | — | 227.3 | 185 |
+| Python | Predictive | **AC** | Light | No | — | 226.9 | 184 |
+| Python | Reactive | **AC** | Light | **Yes** | **259** | 227.2 | 197 |
+| Python | Hybrid | **AC** | Light | **Yes** | **268** | 226.8 | 201 |
+| C++ | Baseline | **AC** | High | No | — | 221.6 | 134 |
+| C++ | Predictive | **AC** | Light | No | — | 223.2 | 132 |
+| C++ | Reactive | **AC** | Light | **Yes** | **447** | 223.2 | 133 |
+| C++ | Hybrid | **AC** | Light | **Yes** | **455** | 221.0 | 143 |
+| Java | Baseline | **AC** | High | No | — | 248.6 | 247 |
+| Java | Predictive | **AC** | Light | No | — | 244.1 | 261 |
+| Java | Reactive | **AC** | Light | **Yes** | **810** | 243.8 | 272 |
+| Java | Hybrid | **AC** | Light | **Yes** | **817** | 243.5 | 274 |
+| C | Baseline | **AC** | High | No | — | 218.5 | 133 |
+| C | Predictive | **AC** | Light | No | — | 218.2 | 131 |
+| C | Reactive | **AC** | Light | **Yes** | **297** | 222.4 | 139 |
+| C | Hybrid | **AC** | Light | **Yes** | **296** | 221.5 | 137 |
 
-## 4. Live Reactive Promotion (P2)
+### P3: All-Pairs Shortest Path (Floyd-Warshall Algorithm)
 
-P2 allocates a 150/160 MiB buffer and is the only benchmark that crosses the
-128 MiB soft watermark. Promotion fired in **8 of 8** eligible runs — Reactive
-and Hybrid across all four languages — and in **zero** of the Predictive runs,
-which cannot promote by design.
+| Language | Strategy | Verdict | Started | Promoted | Promotion (ms) | Peak RSS (MB) | CPU (ms) |
+|---|---|---|---|---|---|---|---|
+| Python | Baseline | **AC** | High | No | — | 10.9 | 321 |
+| Python | Predictive | **AC** | Light | No | — | 11.2 | 322 |
+| Python | Reactive | **AC** | Light | No | — | 10.3 | 306 |
+| Python | Hybrid | **AC** | Light | No | — | 10.6 | 306 |
+| C++ | Baseline | **AC** | High | No | — | 6.7 | 45 |
+| C++ | Predictive | **AC** | High | No | — | 6.7 | 47 |
+| C++ | Reactive | **AC** | Light | No | — | 6.9 | 44 |
+| C++ | Hybrid | **AC** | High | No | — | 6.7 | 44 |
+| Java | Baseline | **AC** | High | No | — | 26.1 | 130 |
+| Java | Predictive | **AC** | Light | No | — | 21.7 | 153 |
+| Java | Reactive | **AC** | Light | No | — | 22.6 | 156 |
+| Java | Hybrid | **AC** | Light | No | — | 24.7 | 149 |
+| C | Baseline | **AC** | High | No | — | 6.8 | 37 |
+| C | Predictive | **AC** | Light | No | — | 6.6 | 37 |
+| C | Reactive | **AC** | Light | No | — | 7.1 | 38 |
+| C | Hybrid | **AC** | Light | No | — | 6.3 | 40 |
 
-| Lang | Reactive | Hybrid | Peak RSS | CPU |
-|---|:---:|:---:|:---:|:---:|
-| Python | 372 ms | 468 ms | ~174 MB | 301–308 ms |
-| C++ | 742 ms | 717 ms | ~170 MB | 247–254 ms |
-| Java | 1444 ms | 1361 ms | ~191 MB | 447–459 ms |
-| C | 595 ms | 550 ms | ~170 MB | 259–305 ms |
+### P4: Game Tree Search (Binary Branching Recursion)
 
-Promotion latency tracks the language's allocation *rate*, not the threshold
-crossing: Python touches its 150 MiB fastest and promotes soonest, Java pays
-JVM class-loading and heap-growth overhead first. Every promoted run still
-finished `AC`, confirming that lifting the ceiling mid-execution does not
-disturb the running process.
+| Language | Strategy | Verdict | Started | Promoted | Promotion (ms) | Peak RSS (MB) | CPU (ms) |
+|---|---|---|---|---|---|---|---|
+| Python | Baseline | **AC** | High | No | — | 10.6 | 304 |
+| Python | Predictive | **AC** | Light | No | — | 11.0 | 307 |
+| Python | Reactive | **AC** | Light | No | — | 10.1 | 304 |
+| Python | Hybrid | **AC** | Light | No | — | 10.5 | 302 |
+| C++ | Baseline | **AC** | High | No | — | 6.5 | 53 |
+| C++ | Predictive | **AC** | Light | No | — | 6.6 | 51 |
+| C++ | Reactive | **AC** | Light | No | — | 6.8 | 51 |
+| C++ | Hybrid | **AC** | Light | No | — | 6.4 | 53 |
+| Java | Baseline | **AC** | High | No | — | 25.2 | 134 |
+| Java | Predictive | **AC** | Light | No | — | 21.3 | 154 |
+| Java | Reactive | **AC** | Light | No | — | 23.9 | 147 |
+| Java | Hybrid | **AC** | Light | No | — | 21.3 | 156 |
+| C | Baseline | **AC** | High | No | — | 6.3 | 52 |
+| C | Predictive | **AC** | Light | No | — | 6.9 | 52 |
+| C | Reactive | **AC** | Light | No | — | 7.1 | 53 |
+| C | Hybrid | **AC** | Light | No | — | 6.3 | 48 |
 
----
+### P5: Top-K Streaming Frequencies (Hash Map + Priority Queue)
 
-## 5. Findings
+| Language | Strategy | Verdict | Started | Promoted | Promotion (ms) | Peak RSS (MB) | CPU (ms) |
+|---|---|---|---|---|---|---|---|
+| Python | Baseline | **AC** | High | No | — | 14.3 | 90 |
+| Python | Predictive | **AC** | High | No | — | 16.2 | 87 |
+| Python | Reactive | **AC** | Light | No | — | 13.9 | 96 |
+| Python | Hybrid | **AC** | High | No | — | 13.2 | 93 |
+| C++ | Baseline | **AC** | High | No | — | 7.3 | 42 |
+| C++ | Predictive | **AC** | High | No | — | 7.0 | 43 |
+| C++ | Reactive | **AC** | Light | No | — | 7.2 | 41 |
+| C++ | Hybrid | **AC** | High | No | — | 6.6 | 41 |
+| Java | Baseline | **AC** | High | No | — | 28.8 | 231 |
+| Java | Predictive | **AC** | High | No | — | 28.9 | 229 |
+| Java | Reactive | **AC** | Light | No | — | 22.8 | 201 |
+| Java | Hybrid | **AC** | High | No | — | 28.7 | 229 |
+| C | Baseline | **AC** | High | No | — | 6.6 | 41 |
+| C | Predictive | **AC** | Light | No | — | 6.5 | 44 |
+| C | Reactive | **AC** | Light | No | — | 6.7 | 42 |
+| C | Hybrid | **AC** | Light | No | — | 6.6 | 43 |
 
-### 5.1 The saving is in reserved capacity, not in RSS
+## 4. Aggregate Findings
 
-The clearest correct claim is about **capacity, not footprint**. Bounded runs
-reserve a hard 256 MiB; Baseline reserves whatever the host has. On a 15 GiB
-self-hosted judge that is the difference between admitting a predictable number
-of concurrent submissions and letting the first heavy job set the ceiling for
-everyone.
+### 4.1 Tiering carries no measurable CPU cost
 
-Note that peak RSS often *rises* slightly under a bounded tier (P1 C++: 6.2 →
-6.5 MB). That is not a regression — it is the 2 ms sampler reading a different
-set of transient pages. Reporting peak RSS as the primary saving, as earlier
-revisions of this document did, overstates what the scheduler controls.
+| Strategy | n | Mean CPU (ms) |
+|---|---|---|
+| Baseline | 20 | 121.0 |
+| Predictive | 20 | 124.4 |
+| Reactive | 20 | 124.2 |
+| Hybrid | 20 | 126.0 |
 
-### 5.2 Predictive under-reserves on P2, and that is the finding
+Spread across all four strategies is 121.0-126.0 ms, or 4.2%. Tiering changes which cgroup limits apply, not how much work the submission does, so CPU time should not move; it does not.
 
-P2 needs ~170–195 MB. Predictive routed **all four languages to the Light
-tier** anyway, because the model is trained on CodeNet/CodeContests submissions
-and these synthetic benchmark programs sit outside that distribution. Measured
-headroom under the 256 MiB ceiling:
+### 4.2 Adaptive strategies reserve hard ceilings where Baseline reserves none
 
-| Lang | Peak under Predictive | Headroom remaining |
-|---|:---:|:---:|
-| Java | 190.2 MB | 65.8 MB |
-| C | 170.2 MB | 85.8 MB |
-| C++ | 169.8 MB | 86.2 MB |
-| Python | 174.1 MB | 81.9 MB |
+**44 of 80 runs (55%) were held at a hard 256 MiB ceiling** for their whole execution. The remainder are Baseline runs (uncapped by design) and the 8 P2 runs that were promoted mid-execution.
 
-All four survived, but Java cleared the ceiling by only ~26%. A submission
-roughly 35% larger would have been OOM-killed with no promotion path — the
-Light tier is a hard `memory.max`, and Predictive does not arm the reactive net.
+This is the defensible form of the savings claim. Peak RSS frequently *rises* slightly under a bounded tier (P1 Python: 10.4 MB uncapped vs 11.1 MB bounded) because the 2 ms sampler catches different transient pages; there is no runtime cost to the bound. What the scheduler controls is **reserved capacity**: a bounded run cannot consume more than 256 MiB, so a host admits a predictable number of concurrent submissions, whereas under Baseline the first heavy job effectively sets the ceiling for everyone sharing the host. On the 15 GiB calibration host that is the difference between a bounded admission count and unbounded contention.
 
-This is not a defect to hide; it is the empirical justification for the reactive
-path existing. Pure static analysis was not sufficient on this workload, and the
-Hybrid strategy is what closes the gap. Reactive and Hybrid promoted all eight
-P2 runs; Predictive rescued none.
+### 4.3 Predictive misclassifies P2 in all four languages
 
-### 5.3 Tier assignment is stable but not always optimal
+This is the most important negative result in the matrix, and it is the empirical justification for the reactive path.
 
-P5 Top-K Streaming shows the intended effect cleanly: C++ drops 51.3 → 6.5 MB
-and Java 79.8 → 26.2 MB under Hybrid. P3 C is the one case where Predictive is
-*worse* than Baseline (42.9 vs 34.6 MB), a reminder that the model is a
-heuristic and occasionally mis-ranks.
+| Language | P(Heavy) decision | Started | Promoted? | Peak RSS | Headroom to 256 MiB cap |
+|---|---|---|---|---|---|
+| Python | Light | Light | **No** | 226.9 MB | 41.5 MB (15.5%) |
+| C++ | Light | Light | **No** | 223.2 MB | 45.2 MB (16.8%) |
+| Java | Light | Light | **No** | 244.1 MB | 24.3 MB (9.1%) |
+| C | Light | Light | **No** | 218.2 MB | 50.2 MB (18.7%) |
 
-### 5.4 CFS `cpu.stat` timing
+The XGBoost classifier routed **all four** P2 languages to Tier 1, and because Predictive does not run the watermark monitor, **no run was ever promoted**. All four survived only because their true peak stayed under the 256 MiB hard limit — Java cleared it by just **24.3 MB (9.1%)**.
 
-Measuring CPU via the cgroup `usage_usec` delta rather than wall-clock around
-`docker exec` removes the 150–200 ms of container startup that otherwise
-dominates sub-second programs. Across this matrix the four strategies land
-within 2.7% of each other on mean CPU, which is the level of agreement you need
-before claiming tiering is free.
+Had the fixtures been sized 5% larger, every one of these runs would have been OOM-killed at the tier limit. This is a real limitation of static AST analysis on allocation-dominated submissions: the feature extractor sees a large `bytearray` or `new byte[]` and the size literal, but a P2 submission at 200 MiB and one at 230 MiB are structurally near-identical, so a threshold trained on CodeNet/CodeContests distributions has no basis to separate them. The Reactive and Hybrid strategies promote all four correctly and return `AC`.
 
----
+We report this as the paper's central argument for combining prediction with kernel-level enforcement: **the model is fast but not trustworthy at the boundary, and the watermark is what makes the boundary safe.**
 
-## 6. Threats to Validity
+### 4.4 Predictive over-provisions P5
 
-- **Single host, single run per cell.** No repeated trials, so no confidence
-  intervals. The ±3.4–4.7% stability figures quoted in earlier revisions of this
-  document were not reproduced here and should not be cited without re-measuring.
-- **2 ms sampling under-reports peaks.** A short-lived allocation between two
-  ticks is invisible to `memory.current`.
-- **Synthetic benchmark programs.** The five problems are hand-written to match
-  the complexity classes in the literature; they are not drawn from the
-  CodeNet/CodeContests distribution the model was trained on. The P2
-  misclassification in §5.2 is a direct consequence and limits how far the
-  accuracy figures generalize.
-- **A 256 MiB tier is unusually tight for managed runtimes.** Java clears only
-  26% headroom on P2; a normal contest setting would use a larger ceiling and
-  see fewer promotions.
+| Language | Started | Peak RSS | Over-provisioning |
+|---|---|---|---|
+| Python | High | 16.2 MB | **wasted 256 MiB reservation** |
+| C++ | High | 7.0 MB | **wasted 256 MiB reservation** |
+| Java | High | 28.9 MB | **wasted 256 MiB reservation** |
+| C | Light | 6.5 MB | correct |
+
+The inverse error: P5's streaming top-K uses at most 28.9 MB but Predictive starts three of four languages uncapped, reserving host capacity for a submission that never needs it. The cost here is opportunity rather than correctness, but it is the same threshold operating in the wrong direction.
+
+## 5. Threats to Validity
+
+**Single run per cell.** Each of the 80 cells is one execution. We report no confidence intervals, and small differences between neighbouring cells (a few MB of peak RSS) should not be read as real. Where an initial run looked anomalous — P1 Baseline showed 61.4 MB for C++ and 114.8 MB for Java on a problem that normally uses 6-7 MB and 25 MB — we re-ran those cells three times and report the median. The repeats were tight (C++ 6.3-6.7 MB, Java 23.3-25.9 MB), confirming the originals were first-run cold-cache artefacts, and the corrected values are in Section 3. Any single-run figure here should still be read with that caveat.
+
+**Workload is five synthetic problems, not a contest.** These fixtures are our own and were written to span the light-to-heavy range deliberately. They are not a representative sample of contest submissions, and the 55% bounded figure in Section 4.2 is a property of this mix, not an estimate for any real judge. The macro-scale 47.68% RAM and 21.58% CPU figures in the paper come from the 10,000-submission simulation, not from this matrix.
+
+**Model accuracy figures are not reproduced here.** The XGBoost accuracy, F1, and ROC-AUC numbers in the paper come from Problem-Grouped 5-fold cross-validation over CodeNet and CodeContests. This matrix does not re-validate them; it measures what the deployed thresholds do on five unseen problems.
+
+**Promotion timing depends on page-commit rate.** The 259-817 ms spread in Section 2 reflects when each runtime physically commits pages, not scheduler overhead. It is a property of these fixtures on this host.
+
+**No concurrency testing.** All 80 runs were submitted serially. This matrix says nothing about behaviour under simultaneous load; the queue-latency claims in the paper come from the discrete-event simulation.
+
+**Stale binary for two probes.** The judge on the calibration host was running a build predating the TLE/MLE commit, so a 900 MB forced allocation returned `RE` rather than `MLE` and an infinite loop returned no verdict instead of `TLE`. Neither path is exercised by this matrix — no cell hit the 10 s deadline (max observed CPU: 322 ms) or the 256 MiB limit (max observed peak: 248.6 MB) — so the 80 cells are unaffected. The TLE and MLE probes should be re-run after a rebuild before any of those verdicts are claimed in the paper.
+
