@@ -1,8 +1,8 @@
 Provisioning_Dimension,Static_Baseline_Cloud,RAAS_OCJS_Adaptive_Cloud,Cloud_Efficiency_Gain
-Default Per-Pod Memory Reservation,2048 MiB,128 MiB,16.0x reduction in baseline pod memory
+Default Per-Pod Memory Reservation,2048 MiB,256 MiB,8.0x reduction in baseline pod memory
 Default Per-Pod CPU Reservation,2.0 vCPUs,1.0 vCPU,2.0x reduction in baseline CPU reservation
-"Max Pod Packing Density (AWS EC2 c6i.4xlarge, 32 GB)",14 concurrent pods,224 concurrent pods,16.0x higher container density per VM
-VM Fleet Size for 500-Sub Burst,36 VMs (14 slots each),3 VMs (224+ slots each),91.7% reduction in active cloud VMs
-Cluster Hourly Cost (AWS @ USD 0.68/hr),USD 24.48 / hour,USD 2.04 / hour,USD 22.44 / hour savings (91.7% cost cut)
-"Total Contest RAM Reserved (10,000 Subs)",20000.0 GB,9846.88 GB,10153.12 GB reclaimed (50.77% savings)
+"Max Pod Packing Density (AWS EC2 c6i.4xlarge, 32 GB)",14 concurrent pods,112 concurrent pods,8.0x higher container density per VM
+VM Fleet Size for 500-Sub Burst,36 VMs (14 slots each),5 VMs (112+ slots each),86.1% reduction in active cloud VMs
+Cluster Hourly Cost (AWS @ USD 0.68/hr),USD 24.48 / hour,USD 3.40 / hour,USD 21.08 / hour savings (86.1% cost cut)
+"Total Contest RAM Reserved (10,000 Subs)",20000.0 GB,10485.25 GB,9514.75 GB reclaimed (47.57% savings)
 Flash Crowd Response (Scoreboard Freeze),Emergency Autoscaling (Lag: 60-180s),Absorbed in-place by ultra-dense nodes (Lag: 0s),Zero autoscaling lag; zero queue backlogs
