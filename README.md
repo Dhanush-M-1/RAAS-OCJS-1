@@ -43,7 +43,7 @@ RAAS-OCJS provides four switchable scheduling engines:
 |---|---|---|---|
 | **Baseline** | Intake | Current standard practice | Always assigns Heavy tier (Uncapped Host Memory & CPU) |
 | **Predictive** | Pre-Execution | Tree-sitter AST $\rightarrow$ 32 features $\rightarrow$ Compiled XGBoost | Assigns Light (256 MiB, 1 CPU) or Heavy tier before launching container |
-| **Reactive** | Mid-Execution | Linux cgroup v2 event-driven monitoring | Starts in Light tier (256 MiB); dynamically promotes to Uncapped if 70% (~179.2 MiB) watermark is crossed |
+| **Reactive** | Mid-Execution | Linux cgroup v2 event-driven monitoring | Starts in Light tier (256 MiB); promotes to Uncapped (memory *and* CPU caps lifted) once the `memory.events` `high` counter crosses the 70% (~179.2 MiB) watermark. The trigger is memory pressure only - a purely CPU-bound submission is never promoted |
 | **Hybrid** | Both | Predictive start + Reactive live safety net | Starts in ML-predicted tier; actively promotes if memory spikes exceed prediction |
 
 ---
@@ -62,9 +62,9 @@ flowchart TD
     D --> F["Heavy Tier<br/>Uncapped<br/><br/>memory = Unlimited<br/>cpus = Unlimited"]
 
     E --> G["cgroup v2 Reactive Monitor<br/>(2ms tick)"]
-    G --> H{"cur >= 179.2 MB (70%)?"}
+    G --> H{"memory.events high / memory.current >= 70%?"}
 
-    H -->|YES| I["Live Promotion<br/><br/>write memory.high=max<br/>write memory.max=max<br/>→ Uncapped"]
+    H -->|YES| I["Live Promotion<br/><br/>write memory.high=max<br/>write memory.max=max<br/>docker update --memory 0 --memory-swap -1 --cpus 0<br/>→ Uncapped (CPU cap lifted too)"]
     H -->|NO| J["Continue in Light Tier"]
 
     I --> K["Microsecond CFS cpu.stat Accounting"]
@@ -108,27 +108,80 @@ The system includes five high-stakes competition problems modeled after **Codefo
 
 ## 06. Experimental Results
 
-*Measured on the bare-metal calibration host (i5-13420H, 15 GiB, cgroup v2, watermark 179.2 MiB) over the full 5 problems × 4 languages × 4 strategies matrix — 80 live runs, all 80 `AC`.*
+*All figures below come from the live judge on the bare-metal calibration host (Fedora 44 KDE, 15 GiB usable RAM, cgroup v2; Low tier 256 MiB; watermark 70% = 179.2 MiB), driven by the single harness [`benchmarks/raas_benchmark.py`](benchmarks/raas_benchmark.py).*
 
-| Problem | Strategy | Verdict | Initial Tier | Promoted? | CPU (`cpu.stat`) | Peak RSS | Allocated |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **P1: Prefix Sums** (Python) | Baseline | **AC** | Heavy | No | 54 ms | 10.4 MB | Uncapped |
-| | Predictive / Reactive / Hybrid | **AC** | Light | No | 52–56 ms | 10.1–11.1 MB | **256 MiB** |
-| **P2: Knapsack (200/210 MiB)** (Java) | Baseline | **AC** | Heavy | No | 247 ms | 248.6 MB | Uncapped |
-| | Predictive | **AC** | Light | No | 261 ms | 244.1 MB | 256 MiB |
-| | **Reactive / Hybrid** | **AC** | Light | **Yes (810 / 817 ms)** | 272–274 ms | 243.5–243.8 MB | 256 MiB → Uncapped |
-| **P3: Floyd-Warshall** (Python) | Baseline | **AC** | Heavy | No | 321 ms | 10.9 MB | Uncapped |
-| | Predictive / Reactive / Hybrid | **AC** | Light | No | 306–322 ms | 10.3–11.2 MB | **256 MiB** |
-| **P4: Tree Search** (C++) | Baseline | **AC** | Heavy | No | 53 ms | 6.5 MB | Uncapped |
-| | Predictive / Reactive / Hybrid | **AC** | Light | No | 51–53 ms | 6.4–6.8 MB | **256 MiB** |
-| **P5: Top-K Streaming** (C++) | Baseline | **AC** | Heavy | No | 42 ms | 7.3 MB | Uncapped |
-| | Predictive / Reactive / Hybrid | **AC** | Light | No | 41–43 ms | 6.6–7.2 MB | **256 MiB** |
+### 6.1 Live corpus — 100 submissions × 4 strategies
 
-**Aggregate across all 80 runs:** mean CPU is flat across strategies (121.0–126.0 ms, spread 4.2%) — tiering carries no measurable CPU cost. **44 of 80 runs (55%) were held at a hard 256 MiB ceiling**; the rest were Baseline or promoted mid-run. Live promotion fired in **8 of 8** eligible P2 runs and **0** Predictive runs.
+**400/400 `AC`, 0 transport failures, 394 s wall clock.** A pure CodeContests corpus contains no memory-heavy programs, so **0 promotions** fired across the whole suite.
 
-> **Predictive fails at the boundary.** On P2 the classifier routed all four languages to Light and, with no watermark monitor running, never promoted. All four survived only because their true peak stayed under the hard limit — Java cleared it by just **24.3 MB (9.1%)**. A 5% larger fixture would have OOM-killed all four. This is the empirical case for keeping the watermark active: the model is fast but not trustworthy at the tier boundary. See `docs/EXPERIMENTAL_RESULTS.md` §4.3.
+| Metric | Value |
+|---|---|
+| Runs started in the High tier | 246 |
+| Runs started in the Low tier | 154 |
+| Peak memory used — min / median / mean / max | 6.3 MB / 10.6 MB / 14.4 MB / 53.0 MB |
+| Runs under 25 MB | 383 / 400 (95.8%) |
+| Allocated per run | 256 MB (Low start) or 2048 MB (High start) |
 
-Raw per-cell measurements are committed in `benchmarks/laptop_matrix_80run.json`.
+### 6.2 Verdict-path probes
+
+All five verdict paths are verified against ground truth — **AC, WA, RE, TLE, MLE (5/5)**. The TLE probe is killed by the 10 s per-case guard (~10.03 s CPU / ~10.26 s wall). The MLE probe starts in the Low tier and peaks at ~255.5–256.0 MB before the kernel OOM-kills it.
+
+### 6.3 Synthetic suite — live reactive promotion
+
+On the synthetic heavy knapsack the same program behaves differently by language, now that the JVM heap is sized from the tier:
+
+| Language | Promotion | Peak | Verdict |
+|---|:---:|---:|:---:|
+| C, C++, Python | promoted | 171–203 MB | **AC** |
+| Java (Reactive / Hybrid) | promoted `true` | 202.6 MB | **RE** |
+| Java (Predictive) | promoted `false` | 202.5 MB | **RE** |
+
+> **The JVM is not rescued by promotion.** `-Xmx` is fixed at launch (75% of the Low tier = 192 MiB), so once a Java submission is started in the Low tier it cannot grow past its launch-time heap even after the container is promoted. Reactive promotion therefore ends a genuinely oversized Java submission in `RE` instead of an `MLE` race. For JVM languages, correct **routing** (Predictive) is the mechanism that matters — the watermark alone is not enough.
+
+### 6.4 Macro contest simulation
+
+*Seeded (`BENCH_SEED=42`), N = 10,000 submissions drawn from the 43 real problems, 256 MiB tier.*
+
+| Strategy | Slots | Allocated GB | Used GB | Waste | CPU core-h | Avg queue wait | P95 turnaround |
+|---|:---:|---:|---:|---:|---:|---:|---:|
+| Baseline | 7 | 20000.0 | 119.71 | 99.4% | 5.622 | 2.36 ms | 1448.52 ms |
+| Predictive | 56 | 14860.25 | 116.71 | 99.21% | 4.827 | 0.0 ms | 1434.47 ms |
+| Reactive | 56 | 2500.0 | 116.79 | 95.33% | 2.876 | 0.0 ms | 1471.9 ms |
+| Hybrid | 56 | 14860.25 | 118.93 | 99.2% | 4.831 | 0.0 ms | 1418.68 ms |
+
+Memory saved against Baseline: **Predictive 5139.75 GB (25.7%)**, **Reactive 17500.0 GB (87.5%)**, **Hybrid 5139.75 GB (25.7%)**. Live promotions in the simulation: **0** for every strategy.
+
+### 6.5 Burst stress
+
+*N = 500 submissions in a 30 s window on the 15 GiB host. Baseline safe = `floor(14336 / 2048)` = 7 slots; adaptive = `floor(14336 / 256)` = 56 slots.*
+
+| Scenario | Slots | Avg queue wait | P95 turnaround | Drain | Host RAM util |
+|---|:---:|---:|---:|---:|---:|
+| Baseline (safe) | 7 | 20966.9 ms | 41794.6 ms | 73.8 s | 93.3% |
+| Baseline (2x overcommit) | 14 | 2996.0 ms | 7401.6 ms | 37.7 s | 186.7% |
+| Predictive (adaptive) | 56 | 0.0 ms | 1421.8 ms | 31.3 s | 93.3% |
+| Reactive (adaptive) | 56 | 0.0 ms | 1482.8 ms | 31.2 s | 93.3% |
+| Hybrid (adaptive) | 56 | 0.0 ms | 1394.5 ms | 31.3 s | 93.3% |
+
+### 6.6 Cloud provisioning projection
+
+- Per-pod memory reservation: **2048 MiB → 256 MiB (8.0x)**; per-pod CPU: **2.0 → 1.0 vCPU (2.0x)**.
+- Packing density on an AWS `c6i.4xlarge` (32 GB): **14 → 112 concurrent pods (8.0x)**.
+- 500-submission burst fleet: **36 VMs → 5 VMs (86.1% fewer)**.
+- Cluster cost at USD 0.68/hr per VM: **USD 24.48/hr → USD 3.40/hr (USD 21.08/hr saved, 86.1%)**.
+- Total reserved RAM over 10,000 submissions under Reactive: **20000.0 GB → 2500.0 GB (17500.0 GB reclaimed, 87.5%)**.
+
+### 6.7 Per-language profile
+
+*256 MiB tier, Baseline → Reactive.*
+
+| Language | n | Share | Avg CPU | Avg container wall | P95 turnaround | Waste | Saved |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| C++ | 6743 | 67.4% | 115.7 → 116.4 ms | 1219.1 → 1216.8 ms | 1514.1 → 1526.8 ms | 99.47% → 95.87% | 87.5% |
+| Java | 1008 | 10.1% | 290.2 → 292.1 ms | 876.8 → 1127.9 ms | 1003.8 → 1332.8 ms | 98.82% → 90.99% | 87.5% |
+| Python | 2249 | 22.5% | 152.9 → 153.0 ms | 451.4 → 449.3 ms | 663.2 → 659.5 ms | 99.46% → 95.65% | 87.5% |
+
+Raw per-cell measurements are committed under [`benchmarks/results/`](benchmarks/results/) as `real_dataset_*_tier256.csv`.
 
 Full per-language matrix, promotion traces, and threats to validity: [`docs/EXPERIMENTAL_RESULTS.md`](docs/EXPERIMENTAL_RESULTS.md).
 
@@ -215,7 +268,7 @@ With the server still running, in a third terminal:
 # The harness defaults to a LAN IP (http://192.168.0.111:3000) — override it:
 JUDGE_URL=http://localhost:3000 python3 benchmarks/raas_benchmark.py all
 ```
-This streams real problems from `deepmind/code_contests`, validates each solution, and regenerates `benchmarks/results/real_dataset_*_tier256.csv`. See [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) §7.
+`benchmarks/raas_benchmark.py` is the single entry point (`preflight`, `probe`, `fetch`, `run`, `simulate`, `all`, `status`). It streams real problems from `deepmind/code_contests`, validates each solution, caches the corpus under `benchmarks/dataset/`, and writes `benchmarks/results/real_dataset_*_tier256.csv`. Useful knobs: `LIGHT_TIER_MB`, `BENCH_SEED`, `--count`, `--with-synthetic`, `--langs-per-problem`, `--max-candidates`, `--validate-cases`. See [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) §6.
 
 ---
 

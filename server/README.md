@@ -1,6 +1,6 @@
 # RAAS-OCJS — Judge Server
 
-Resource-aware judge: takes a submission, decides an isolation tier (Light/Heavy),
+Resource-aware judge: takes a submission, decides an isolation tier (Low/High),
 runs it in a Docker container, grades it, and reports resource metrics.
 
 Built with **axum** + **tokio**, feature extraction via tree-sitter, and a
@@ -58,6 +58,12 @@ cd ../server
 cargo build                # bakes the new weights into the binary
 ```
 
+> **Feature changes are a four-way edit.** Feature counts are hardcoded in the compiled
+> models under `src/generated/*.rs` (32 inputs for the specialised models, 36 for the unified
+> one) and in `server/src/predict.rs`. Changing the feature set means updating the extractor,
+> the trainer, `regenerate_models.sh` **and** `predict.rs` together, or the model and the
+> runtime will disagree.
+
 > `regenerate_models.sh` needs `m2cgen` + `joblib` in a Python venv at
 > `model-training/.venv`. If the venv doesn't exist (e.g. after a clean checkout),
 > set it up first:
@@ -80,7 +86,7 @@ cargo build                # bakes the new weights into the binary
 > 
 > On Linux, writing to cgroup controller files owned by systemd requires root privileges.
 > - **If run without `sudo`**: You will see `[moderator] failed to arm memory.high: Permission denied (os error 13)` in the server logs. The kernel will **not** emit pressure events, and **programs will NOT be promoted mid-execution**.
-> - **If run with `sudo`**: The watermark arms successfully, and heavy submissions (such as Problem 2: Knapsack 2D DP) will smoothly trigger live promotion from Light (256 MB) to Uncapped.
+> - **If run with `sudo`**: The watermark arms successfully, and heavy submissions (such as Problem 2: Knapsack 2D DP) will smoothly trigger live promotion from Low (256 MiB) to Uncapped (`Tier::High`).
 
 Run from the `server/` directory:
 
@@ -101,18 +107,24 @@ Expected output:
 Judge is online and listening on :3000
 ```
 
-> **Docker Context Check**: Ensure native Linux Docker is active so host cgroups are accessible:
-> ```bash
-> docker context use default
-> ```
+> **Docker Context**: the judge sets `DOCKER_CONTEXT=default` itself at startup whenever
+> `/var/run/docker.sock` exists, so host cgroups stay reachable. This is not cosmetic: under
+> the `docker-desktop` context the host cgroup directories are hidden, and the judge silently
+> degrades to the docker-exec fallback (no `MLE` detection, wall-clock CPU time instead of
+> cgroup `cpu_stat`). No manual `docker context use` is required.
 
 ---
 
 ## 4. Submit code
 
+> [!WARNING]
+> The server binds `0.0.0.0:3000` with **no authentication and no payload limit**, and it
+> compiles and executes untrusted submitted source. It must **never** be exposed publicly —
+> bind to a LAN/tailnet address or reach it through a tunnel only.
+
 `POST /submit` with JSON. The `approach` field selects the scheduling strategy.
 
-**Baseline** (always Heavy):
+**Baseline** (always High):
 
 ```bash
 curl -X POST localhost:3000/submit -H 'content-type: application/json' -d '{
@@ -124,7 +136,7 @@ curl -X POST localhost:3000/submit -H 'content-type: application/json' -d '{
 }'
 ```
 
-**Predictive** (XGBoost picks Light/Heavy from AST features):
+**Predictive** (XGBoost picks Low/High from AST features):
 
 ```bash
 curl -X POST localhost:3000/submit -H 'content-type: application/json' -d '{
@@ -136,7 +148,7 @@ curl -X POST localhost:3000/submit -H 'content-type: application/json' -d '{
 }'
 ```
 
-**Reactive** (starts Light, promotes mid-run on cgroup pressure):
+**Reactive** (starts Low, promotes mid-run on cgroup pressure):
 
 ```bash
 curl -X POST localhost:3000/submit -H 'content-type: application/json' -d '{
@@ -189,12 +201,12 @@ curl -X POST localhost:3000/submit -H 'content-type: application/json' -d '{
 
 | Field                    | Meaning                                                                            |
 | ------------------------ | ---------------------------------------------------------------------------------- |
-| `verdict`                | `AC` (ok), `WA` (wrong answer), `TLE`, `MLE`, `RE`, `CE`, `SE` (server exec error) |
-| `tier_started`           | `low` (Light) / `high` (Heavy) — the tier the submission began in                  |
+| `verdict`                | `AC` (ok), `WA` (wrong answer), `TLE`, `MLE`, `RE`, `SE` (server exec error)                 |
+| `tier_started`           | `low` (Low) / `high` (High) — the tier the submission began in                       |
 | `tier_promoted`          | `true` if the reactive path lifted the container's limits mid-run                  |
 | `promotion_time_ms`      | wall-clock ms from submission start until the promotion write                      |
 | `peak_memory_bytes`      | max physical RSS `memory.current` sampled during execution                         |
-| `allocated_memory_bytes` | configured cgroup memory limit (256 MiB for Light tier, 0 for Uncapped)            |
+| `allocated_memory_bytes` | configured cgroup memory limit (256 MiB for Low tier, 0 for Uncapped/High)         |
 | `cpu_time_ms`            | sum of per-case CPU time measured via cgroup v2 CFS `cpu.stat` delta               |
 | `wall_time_ms`           | total elapsed wall-clock time from request receipt to completion                   |
 
@@ -212,7 +224,7 @@ curl -X POST localhost:3000/submit -H 'content-type: application/json' -d '{
 `TLE` and `MLE` are both read from ground truth rather than inferred: `TLE` from
 a wall-clock guard, `MLE` from the kernel's monotonic `oom_kill` counter (which
 is baselined per test case, so an OOM on case 1 does not mislabel case 2). A
-Light-tier submission that exceeds 256 MiB is graded `MLE` under Baseline and
+Low-tier submission that exceeds 256 MiB is graded `MLE` under Baseline and
 Predictive; under Reactive and Hybrid the monitor normally promotes it first, so
 `MLE` there means the promotion missed the spike.
 
@@ -231,7 +243,7 @@ the Docker daemon's own accounting agrees, and becomes the sole mechanism only i
 the degraded fallback path. The mechanism, per submission:
 
 ```
-docker run --cpus=1 --memory=256m --network=none <runtime-image>   # Low tier start
+docker run --cpus=1 --memory=256m --memory-swap=256m --network=none <runtime-image>   # Low tier start
 locate cgroup dir ONCE  /proc/<pid>/cgroup -> /sys/fs/cgroup/system.slice/docker-<id>.scope
 write memory.high 187904819      # arm the ~179.2 MiB (70%) soft watermark (Docker does NOT set it)
 for each test case (docker exec):
@@ -254,23 +266,38 @@ docker rm -f
 - **Promotion ceiling:** Reactive/Hybrid are lifted to `max` (unlimited), the same
   ceiling a `Tier::High` start already gives Baseline/Predictive, so a promoted
   correct program is never capped below the baseline.
-- **Memory-only scope:** the trigger and the promotion touch memory only. CPU is
-  left at 1 vCPU. A purely CPU-bound program that never crosses the memory
-  watermark will **not** be promoted — CPU-based promotion (`cpu.stat` /
-  `cpu.max`) is a later follow-up. State this explicitly when making paper claims.
+- **Memory-only trigger:** the monitor watches only memory (`memory.events` `high` counter and
+  `memory.current`). A purely CPU-bound program that never crosses the memory watermark will
+  **not** be promoted — CPU-based promotion (`cpu.stat` / `cpu.max` as a trigger) is a later
+  follow-up. State this explicitly when making paper claims. Note that the promotion itself
+  lifts **both** caps (`docker update --cpus 0` as well as `--memory 0`), so a submission that
+  is promoted on memory pressure also regains unlimited CPU.
 
 ### Tuning knobs & honest caveats
 
-- `LOW_MEM_HIGH_WATERMARK` (currently ~179.2 MiB / 70% of `memory.max`) in `src/docker.rs` — the soft line
-  below Docker's 256 MiB `memory.max`. Lower → reacts earlier; must stay under the
-  hard limit so pressure events fire before any OOM-kill.
+- `LOW_MEM_HARD_LIMIT_DEFAULT_MB` (`256`) in `src/docker.rs` is the **single source of
+  truth** for the Low tier's hard limit — the `docker run --memory` flag is derived from it
+  (`LOW_TIER_MB` env still overrides for experiments), so the two can no longer drift.
+- `HIGH_WATERMARK_PCT` (currently `70`, i.e. ~179.2 MiB of the 256 MiB hard limit) in
+  `src/docker.rs` — the soft line below Docker's `memory.max`. Lower → reacts earlier; must
+  stay under the hard limit so pressure events fire before any OOM-kill.
+- `--memory-swap` is set **equal** to `--memory` deliberately. If `--memory` is set and swap
+  is omitted, Docker defaults the swap limit to the same value, letting the container draw up
+  to ~2x its nominal size from RAM + swap — which silently defeats the tier.
 - `MONITOR_POLL` (currently 2 ms) in `src/docker.rs`. `memory.events` counters are
   monotonic, so a crossed spike is never lost between polls; this interval bounds
   reaction latency.
+- **Java heap is tier-derived:** `-Xmx` is 75% of the Low hard limit (`192m`) in Low and 2x
+  Low (`512m`) in High, with `-XX:+UseSerialGC` (`JAVA_HEAP_PCT_OF_LOW_TIER = 75`). It used
+  to be a hardcoded `-Xmx512m` inside a 256 MiB container — a heap allowance twice the
+  container cap. Max measured Java peak across the wide corpus is 53 MB (all languages).
 - **Permissions:** the judge must be able to read/write `/sys/fs/cgroup` on the
   host (root, or a user with the delegated scope) — i.e. **native Linux Docker**,
   not Docker running inside a VM. If the cgroup dir can't be reached the judge logs
-  a warning and degrades gracefully (no promotion, `peak_memory_bytes` stays 0).
+  a warning and degrades to the docker-exec fallback: no `MLE` detection (the
+  kernel `oom_kill` counter is unreadable) and `cpu_time_ms` comes from wall-clock
+  time instead of cgroup `cpu_stat`. Promotion in that mode is driven by
+  `docker update <c> --memory 0 --memory-swap -1 --cpus 0` alone.
 - **Per-case peak is a sampled approximation:** cgroup `memory.peak` was not
   resettable in our test environment, so each case's peak is the max
   `memory.current` seen by the ~2 ms poll rather than a kernel-tracked high-water

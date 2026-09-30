@@ -48,7 +48,9 @@ cargo build
 > 
 > Under standard Linux systemd cgroup hierarchies, unprivileged processes cannot write to `/sys/fs/cgroup`.
 > - **Without `sudo`**: The server starts, but logs `[moderator] failed to arm memory.high for oj_...: Permission denied (os error 13)`. The kernel never increments `memory.events` pressure counters, and **reactive promotion will never trigger**.
-> - **With `sudo`**: The server writes `memory.high` cleanly. Heavy jobs (e.g. Problem 2: 0-1 Knapsack DP) trigger live promotion from Light (256 MB) to Uncapped at runtime.
+> - **With `sudo`**: The server writes `memory.high` cleanly. Memory-heavy jobs (e.g. the Problem 2 0-1 knapsack in C, C++ or Python) cross the watermark and are promoted from Low (256 MiB) to Uncapped at runtime, passing at 171–203 MB peak.
+>
+> The Low tier is enforced with `--cpus=1 --memory=256m --memory-swap=256m`. Swap is pinned equal to the memory limit deliberately: with `--memory` set and `--memory-swap` omitted, Docker defaults swap to the same value and a container can draw roughly 2x its nominal size from RAM+swap.
 
 ```bash
 # Build the binary
@@ -66,13 +68,16 @@ Expected output:
 Judge is online and listening on :3000
 ```
 
+> [!WARNING]
+> **Do not expose the judge to a public network.** It binds `0.0.0.0:3000` with **no authentication** and executes untrusted submitted code. It must never sit in a public security group; keep it reachable only over the LAN / tailnet, or put it behind an authenticated tunnel.
+
 #### How to verify live promotion is active:
 Submit Problem 2 (**0-1 Knapsack Large State Space**) using the Reactive strategy:
 1. In the terminal running the server, confirm there are **no** `Permission denied (os error 13)` warnings.
 2. In the server output or UI, observe:
    - `tier_started: "low"`
    - `tier_promoted: true`
-   - `promotion_time_ms: ~538`
+   - `promotion_time_ms: UNVERIFIED - needs measurement`
    - `allocated_memory_bytes` transitions from `256 MB` to `Uncapped`.
 
 ### 3.3 Verifying Docker Context
@@ -179,13 +184,15 @@ cd ../server
 cargo build
 ```
 
-> Only the Python, C++, Java, and unified models are exported. **C submissions are scored by the C++ specialised model**, so they use the C++ threshold.
+> Only the Python, C++, Java, and unified models are exported. **C submissions are scored by the unified model** (there is no specialised C model), so they use the unified threshold.
 
 ---
 
 ## 6. Real-Dataset Benchmark Harness (Optional)
 
 [`benchmarks/raas_benchmark.py`](../benchmarks/raas_benchmark.py) is the single test entry point. It drives the live judge with real competitive-programming problems streamed from HuggingFace, caches the corpus under `benchmarks/dataset/`, and writes `benchmarks/results/real_dataset_*_tier256.csv`.
+
+Subcommands: `preflight`, `probe`, `fetch`, `run`, `simulate`, `all`, `status`. Slot counts are derived, never hardcoded: on the 15 GiB reference host (14336 MiB usable) the baseline safe count is `floor(14336 / 2048)` = 7 slots and the adaptive count is `floor(14336 / 256)` = 56 slots (see the environment knobs below).
 
 **Requirements:** a running judge server (see §3) and the Python dependencies from `model-training/requirements.txt`.
 

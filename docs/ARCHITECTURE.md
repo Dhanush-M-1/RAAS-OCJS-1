@@ -9,7 +9,7 @@
 Traditional Online Judges (e.g., DOMjudge, DMOJ, VJudge) enforce uniform, static sandbox allocations for all submissions regardless of algorithmic behavior. A simple $O(1)$ query is assigned identical resources and cgroup ceilings as an intensive $O(N^3)$ dynamic programming problem. On fixed, self-hosted hardware without cloud elasticity, resource over-allocation throttles concurrency, while under-allocation risks premature OOM kills.
 
 **RAAS-OCJS** introduces a two-stage adaptive scheduling architecture:
-1. **Predictive Phase**: Static source code parsing via Tree-sitter and 32-feature AST extraction fed into a Rust-embedded XGBoost classifier to select an initial isolation tier prior to container instantiation.
+1. **Predictive Phase**: Static source code parsing via Tree-sitter and feature extraction — 22 base AST metrics + 10 engineered ratios = 32 features for the specialised per-language models, 36 for the unified model — fed into a Rust-embedded XGBoost classifier to select an initial isolation tier prior to container instantiation.
 2. **Reactive Phase**: Continuous event-driven Linux cgroup v2 monitoring via kernel `memory.events` (specifically the `high` pressure event) and `memory.current` watermarks, dynamically migrating and scaling container resource ceilings live on-the-fly without aborting execution.
 
 
@@ -19,7 +19,7 @@ flowchart TD
 
     B["Tree-sitter Multi-AST<br/>(Python/C++/Java/C)"]:::parser
 
-    C["Rust Feature Extractor (22 AST metrics)<br/>+ 10 engineered ratios in training<br/>(AST Topology, Loops, Collections)"]:::processing
+    C["Rust Feature Extractor (22 base AST metrics)<br/>+ 10 engineered ratios = 32 features<br/>(36 for the unified model)"]:::processing
 
     D["Compiled XGBoost Model (m2cgen)<br/>(Zero Python runtime dependency)"]:::model
 
@@ -29,7 +29,7 @@ flowchart TD
 
     D --> F["Predicted Heavy (High Tier)<br/>- Uncapped Host CPU<br/>- Uncapped Memory"]:::heavy
 
-    E --> G["Async Execution & cgroup v2 Event Monitor<br/>(2 ms Poll on memory.events & cpu.stat)"]:::monitor
+    E --> G["Async Execution & cgroup v2 Event Monitor<br/>(2 ms Poll on memory.events & memory.current)<br/>promotion trigger is memory-only"]:::monitor
 
     G --> H{"Watermark Breached? (cur >= 179.2 MB / 70%)"}:::decision
 
@@ -73,18 +73,21 @@ Built with Rust and Tree-sitter bindings for multi-language AST extraction:
   - Densities and interaction ratios: `loop_density`, `call_density`, `subscript_density`, `branch_density`, `arithmetic_density`, `subscript_2d_ratio`, `recursion_intensity`, `log_max_constant`, `log_ast_nodes`, `log_source_chars`.
 
 ### 2.2 Embedded Inference Engine (`server/src/predict.rs`)
-To ensure sub-millisecond evaluation latency and zero Python runtime overhead:
-- Offline models are trained on IBM Project CodeNet **or** DeepMind CodeContests using Python and scikit-learn/xgboost.
-- Models are transpiled into pure Rust code via `m2cgen` (`server/src/generated/`). Only the Python, C++, Java, and unified multi-language models are exported, with calibrated decision thresholds ($0.200$ to $0.346$).
-- **C submissions are scored by the C++ specialised model** at $\tau = 0.346$; `regenerate_models.sh` does not export the C-specialised model. Re-sync these thresholds from `artifacts/model_comparison.csv` after every retrain.
-- The judge evaluates model inference in $< 5\text{ µs}$ on the hot path without spawning subprocesses or loading weights dynamically.
+To keep evaluation latency low and to avoid any Python runtime overhead:
+- Offline models are trained on a DeepMind CodeContests subset (`model-training/codecontests_subset`: 30,000 files — Java/Python/C++, 10,000 each, 5,000 Light + 5,000 Heavy per language) using Python and scikit-learn/xgboost. No feature encodes total allocation bytes; the only allocation signal is the boolean `large_alloc_flag`.
+- Models are transpiled into pure Rust code via `m2cgen` (`server/src/generated/`). Only the Python, C++, Java, and unified multi-language models are exported, with calibrated decision thresholds ($0.200$ to $0.346$). Because the judge consumes these compiled modules, the feature counts (32 specialised / 36 unified) are hardcoded in **both** `model-training/regenerate_models.sh` and `server/src/predict.rs`.
+- **C submissions are scored by the C++ specialised model** at $\tau = 0.346$; `regenerate_models.sh` does not export the C-specialised model. Re-sync these thresholds from `model-training/artifacts/model_comparison.csv` after every retrain.
+- The judge evaluates model inference on the hot path without spawning subprocesses or loading weights dynamically. (Inference latency: UNVERIFIED - needs measurement.)
 
 ### 2.3 Container Isolation & Kernel cgroup v2 (`server/src/docker.rs`, `server/src/moderator.rs`)
 Submissions run inside dedicated rootless/daemon sandboxes utilizing Linux cgroup v2:
 - **Directory Resolution**: Locates `/sys/fs/cgroup/system.slice/docker-<CONTAINER_ID>.scope/` directly on the Linux host filesystem.
+- **Low-Tier Launch Flags**: `--cpus=1 --memory=256m --memory-swap=256m`. The hard limit comes from the single source of truth `LOW_MEM_HARD_LIMIT_DEFAULT_MB = 256`; `docker --memory` is derived from it rather than hardcoded. Swap equal to memory is deliberate: with `--memory` set and `--memory-swap` omitted, Docker defaults swap to the same value and the container can draw ~2x nominal from RAM+swap.
+- **Tier-Derived JVM Heap**: `-Xmx` is derived from the tier, not hardcoded — 75% of the Low hard limit (192m) in Low, 2x Low (512m) in High, plus `-XX:+UseSerialGC`. A previously hardcoded `-Xmx512m` inside a 256 MiB container produced OOM kills.
+- **Per-Test-Case Wall Guard**: `CASE_TIMEOUT` = 10 s; a case exceeding it is killed and graded `TLE`.
 - **Dual Memory Boundaries**:
   - `memory.max`: Hard OOM limit (256 MiB for Light tier).
-  - `memory.high`: Soft watermark set to ~179.2 MiB (`LOW_MEM_HIGH_WATERMARK`, 70% of `memory.max`). When breached, the kernel throttles memory allocations and increments `memory.events (high)`, allowing the monitor to safely promote the container *before* an OOM killer terminates it.
+  - `memory.high`: Soft watermark set to 179.2 MiB (`HIGH_WATERMARK_PCT = 70`, i.e. 70% of `memory.max`). Docker sets `memory.max` but not `memory.high`, so the judge writes it. When breached, the kernel throttles memory allocations and increments `memory.events (high)`, allowing the monitor to safely promote the container *before* an OOM killer terminates it.
 - **Microsecond Kernel CPU Accounting**:
   - Direct reading of `usage_usec` from `cpu.stat` before and after each test case execution:
     $$\Delta \text{CPU} = \frac{\text{usage\_usec}_{\text{after}} - \text{usage\_usec}_{\text{before}}}{1000} \text{ ms}$$
@@ -93,6 +96,7 @@ Submissions run inside dedicated rootless/daemon sandboxes utilizing Linux cgrou
 ### 2.4 Reactive Monitor & Live Tier Migration (`server/src/moderator.rs`)
 - Polling loop runs on a 2 ms tick (`MONITOR_POLL`).
 - Reads monotonic `memory.events` delta and `memory.current`.
+- The trigger is **memory-only**: the monitor watches the `memory.events` `high` counter and `memory.current`. A purely CPU-bound submission is never promoted.
 - On watermark breach (`cur >= 179.2MB` / 70% or `high_crossed`), the moderator promotes the container **in place** by writing the unlimited token to the host cgroup files, then issues `docker update` so the daemon's own accounting agrees:
   ```rust
   cg.promote_to_unlimited()?;              // memory.high=max; memory.max=max   (authoritative)
@@ -102,7 +106,7 @@ Submissions run inside dedicated rootless/daemon sandboxes utilizing Linux cgrou
       .await?;                             // keep the Docker daemon's view in sync
   ```
   > If the host cgroup directory is **not** directly reachable (e.g. Docker Desktop inside a VM), the judge degrades to a fallback that samples `memory.current` via `docker exec` and relies on `docker update` alone.
-- The container transitions from **Light (256 MiB)** to **Heavy (Uncapped)** mid-execution in under 15 ms, without dropping open file descriptors, child PIDs, or execution state.
+- The container transitions from **Light (256 MiB)** to **Heavy (Uncapped)** mid-execution without dropping open file descriptors, child PIDs, or execution state. (Transition latency: UNVERIFIED - needs measurement.)
 - **Host Privileges & Delegation**: Because writing to `/sys/fs/cgroup/system.slice/docker-<id>.scope/memory.high` touches systemd-managed kernel cgroup controllers, the judge server process must be run with root / sudo permissions (`sudo ./target/debug/server`) or systemd slice delegation. Running without root results in `Permission denied (os error 13)` and suppresses pressure event generation, preventing live promotion.
 
 ---
@@ -115,7 +119,7 @@ Submissions run inside dedicated rootless/daemon sandboxes utilizing Linux cgrou
    - Tokio `mpsc` channel with concurrency bounded by an `Arc<Semaphore>` (max 16 concurrent submissions).
 3. **Execution & Metrics Packaging**:
    - Returns structured `JudgeResult` containing:
-     - `verdict` (`AC`, `WA`, `RE`, `TLE`, `SE`)
+     - `verdict` (`AC`, `WA`, `RE`, `TLE`, `MLE`, `SE`)
      - `cpu_time_ms` (CFS kernel CPU delta)
      - `wall_time_ms` (total elapsed wall-clock time)
      - `peak_memory_bytes` (maximum RSS sampled)
@@ -123,3 +127,7 @@ Submissions run inside dedicated rootless/daemon sandboxes utilizing Linux cgrou
      - `tier_started` & `tier_promoted`
      - `promotion_time_ms` (exact timestamp when live migration took place)
      - Per-test-case breakdown.
+
+---
+
+> **Security note**: the judge binds `0.0.0.0:3000` with **no authentication** and executes untrusted submitted code. Never expose it publicly; run it only on an isolated host or network.

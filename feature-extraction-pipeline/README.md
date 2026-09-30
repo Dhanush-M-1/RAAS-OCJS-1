@@ -21,7 +21,7 @@ The pipeline extracts **22 core AST and structural features** in pure Rust, and 
 | `cyclomatic_complexity`   | uint | Control Flow      | McCabe cyclomatic complexity = $1 +$ decision points (`if`, `for`, `while`, `case`, `&&`, `                                                                                               |     | `, ternary, `elif`). |
 | `is_recursive`            | 0/1  | Recursion         | `1` if any function directly calls itself by name inside its own body.                                                                                                                    |
 | `recursive_call_count`    | uint | Recursion         | Count of self-call sites in recursive functions. Distinguishes linear recursion ($O(N)$) from branching / tree recursion ($O(2^N)$ divide-and-conquer / backtracking).                    |
-| `large_alloc_flag`        | 0/1  | Memory Scale      | `1` if a static allocation or fixed-size global/BSS array exceeds `LARGE_ALLOC_THRESHOLD` (`1_000_000` elements or bytes).                                                                |
+| `large_alloc_flag`        | 0/1  | Memory Scale      | `1` if a static allocation or fixed-size global/BSS array exceeds `LARGE_ALLOC_THRESHOLD` (`1_000_000`). Units are **intentionally uniform** across languages even though the underlying APIs differ (`malloc`/`calloc` size in bytes, `new T[n]` / `.reserve(n)` / Java collection capacities / Python container repetition size in element counts); this is documented intent in the extractor, not a bug. |
 | `has_fast_io`             | 0/1  | Input Scale       | `1` if high-throughput I/O boilerplate is detected (`sync_with_stdio`, `cin.tie`, `BufferedReader`, `StringTokenizer`, `sys.stdin.readline`), signaling large input scale ($N \ge 10^5$). |
 | `has_heavy_datastructure` | 0/1  | Collections       | `1` if heavy standard library containers are used (`unordered_map`, `priority_queue`, `BigInteger`, `defaultdict`, `heapq`, `bitset`, `multiset`).                                        |
 | `has_modulo_arithmetic`   | 0/1  | Operator Markers  | `1` if modulo (`%`) arithmetic appears — typical of hashing, number theory, and cycle-detection solutions.                                                                                |
@@ -67,6 +67,13 @@ The extractor evaluates static and compile-time constant arithmetic (e.g. `5 * 1
 | **C++**    | `new T[n]`, `v.reserve(n)`, `v.resize(n)`, and multi-dimensional fixed-size array declarations `int dp[N][M]`.                           |
 | **Java**   | `new int[n]` array instantiations, `new ArrayList<>(capacity)`, `new HashMap<>(capacity)`.                                               |
 | **Python** | Container repetition `[x] * n` (lists/tuples/bytes), `bytearray(n)`.                                                                     |
+
+**Accepted limitation:** an allocation whose size is given by a *variable* cannot be judged
+statically and is never flagged — the extractor only knows the constant/constant-folded
+dimensions it can evaluate (see the `const_eval` doc comment). Verified behaviour: for a Java
+source containing `new byte[chunks][1024 * 1024]` where `chunks` is a variable,
+`large_alloc_flag` is `1`, because the constant inner dimension *does* exceed the threshold;
+the same source with a literal outer dimension is also `1`.
 
 ---
 
@@ -127,6 +134,9 @@ Runs 44 unit tests and 5 integration tests verifying feature extraction edge cas
 > ⚠️ **Historical / superseded.** The figures in this section are from an earlier
 > CodeNet run and **do not describe the models currently compiled into the judge**.
 > See the authoritative table in [`model-training/README.md`](../model-training/README.md) §4.
+>
+> The accuracy / F1 / precision / recall / ROC-AUC / threshold values below are carried over
+> from that earlier run and are **UNVERIFIED - needs measurement** against the current models.
 
 Trained with GPU-accelerated XGBoost using 5-fold **Problem-Grouped Cross-Validation** (`GroupKFold` on `problem_id` to evaluate strictly against unseen competitive programming problems):
 
@@ -138,4 +148,6 @@ Trained with GPU-accelerated XGBoost using 5-fold **Problem-Grouped Cross-Valida
 | **Specialized Java Model**       | **$78.20\%$** _(std: 77.52%)_ | **$81.54\%$** | $82.03\%$ | $81.06\%$ | **$0.8537$** | $0.482$           |
 | **Unified Multi-Language Model** | **$83.71\%$** _(std: 83.76%)_ | **$84.81\%$** | $80.19\%$ | $89.99\%$ | **$0.9149$** | $0.457$           |
 
-All models are compiled via **Treelite** into standalone `.checkpoint` files for microsecond Python-free C/Rust runtime inference.
+All models are compiled via **m2cgen** into Rust source (`src/generated/*.rs`) by
+[`regenerate_models.sh`](../model-training/regenerate_models.sh) and baked into the judge
+binary at build time — inference has no Python/C dependency at runtime.

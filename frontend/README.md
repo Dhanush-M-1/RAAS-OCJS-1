@@ -12,8 +12,10 @@ Built with **React 19**, **TypeScript**, **Vite**, **Tailwind CSS**, and **Recha
 - **Multi-Language Support**: View and run solutions in **C++**, **Python**, **Java**, and **C**.
 - **Strategy Comparison**: Select an individual strategy (**Baseline**, **Predictive**, **Reactive**, **Hybrid**) or execute **"Run all four strategies"** with a single click.
 - **Unified Memory Analysis**: Side-by-side grouped bar charts and comparison tables rendering **Memory Used** (actual physical RSS) vs. **Memory Allocated** (tier ceiling), highlighting infrastructure savings and live tier promotion transitions.
-- **Responsive Test Case Previews**: Automatic formatting and bounded scroll previews for high-scale benchmark inputs ($N=30,000$ to $50,000$ and 150 MiB state spaces).
+- **Responsive Test Case Previews**: Automatic formatting and bounded scroll previews for high-scale benchmark inputs ($N=30,000$ to $50,000$; state-space footprint UNVERIFIED - needs measurement).
 - **Health Indicator**: Real-time poll checking backend status on `http://localhost:3000/health`.
+
+> **Security note:** The judge API at `http://<host>:3000` binds `0.0.0.0:3000` with **no authentication** and executes untrusted code. It must not be publicly exposed.
 
 ---
 
@@ -45,7 +47,7 @@ frontend/src/
 ├── chartTokens.ts              # Semantic theme tokens for Recharts visualizers
 ├── problems.ts                 # Real-world competition problems, code, & generators
 ├── status.ts                   # Verdict & tier badge tone definitions
-├── theme.tsx                   # Dark / Light theme provider context
+├── theme.ts                    # Dark / Light theme provider context
 ├── components/
 │   ├── CodeEditor.tsx          # Read/write code editor component
 │   ├── StatusChip.tsx          # Verdict (AC, WA, RE, TLE) and Tier badges
@@ -53,5 +55,5 @@ frontend/src/
 │   ├── TestCaseChart.tsx       # Per-case performance visualizer
 │   ├── ThemeProvider.tsx       # Root theme wrapper
 │   ├── ThemeToggle.tsx         # Dark/Light mode toggle button
-│   └── ui/                     # Reusable card, panel, and stat metric primitives
+│   └── ui.tsx                  # Reusable card, panel, and stat metric primitives
 ```
