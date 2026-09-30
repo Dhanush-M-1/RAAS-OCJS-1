@@ -156,6 +156,29 @@ fn get_tier_limits(tier: &Tier) -> Vec<String> {
     }
 }
 
+/// Share of the Low-tier hard limit handed to the JVM heap via `-Xmx`.
+///
+/// The rest is what a JVM needs *outside* the heap - metaspace, thread stacks,
+/// code cache, GC structures - measured at roughly 40-60 MiB for these
+/// submissions. Giving the whole tier to `-Xmx` lets the JVM grow into that
+/// overhead and be OOM-killed anyway; 75% leaves ~64 MiB at the default 256 MiB
+/// tier. This is the sizing FINAL_RESULTS section 7 recommends.
+pub const JAVA_HEAP_PCT_OF_LOW_TIER: u64 = 75;
+
+/// Heap ceiling in MiB for a JVM submission, for the tier it is being started in.
+///
+/// The tier has to be the input here, not a constant: Low is a bounded container
+/// and High is unbounded, so a heap sized for one is simply wrong in the other.
+/// High keeps the historical 2x-low ceiling rather than no ceiling at all, so a
+/// runaway submission cannot consume the whole host.
+fn java_heap_mb(tier: &Tier) -> u64 {
+    let low_mb = low_mem_hard_limit() / (1024 * 1024);
+    match tier {
+        Tier::Low => (low_mb * JAVA_HEAP_PCT_OF_LOW_TIER / 100).max(16),
+        _ => low_mb * 2,
+    }
+}
+
 /// What a full submission run produced, beyond the per-case verdicts.
 pub struct RunOutcome {
     pub results: Vec<CaseResult>,
@@ -523,7 +546,19 @@ async fn start_and_compile(
         "python" => vec!["python3".to_string(), "/app/main.py".to_string()],
         "java" => vec![
             "java".to_string(),
-            "-Xmx512m".to_string(),
+            // Heap ceiling is derived from the tier this container actually
+            // gets. A fixed 512m inside a 256 MiB container told the JVM it
+            // could use twice what the cgroup permits, so an allocation-heavy
+            // submission was OOM-killed at the cap - and killed fast enough
+            // that Reactive/Hybrid recorded a promotion they never got to use.
+            // Sizing it from the tier removes that contradiction: a Low-tier
+            // JVM now self-limits inside its budget instead of racing the
+            // kernel for it.
+            format!("-Xmx{}m", java_heap_mb(tier)),
+            // Serial GC keeps the JVM's non-heap footprint small: one GC
+            // thread instead of a G1 pool, no region metadata. The budget
+            // outside the heap is what the 75% split in java_heap_mb() reserves.
+            "-XX:+UseSerialGC".to_string(),
             "-cp".to_string(),
             "/app".to_string(),
             "Main".to_string(),
@@ -691,5 +726,47 @@ mod sanitize_tests {
         assert_ne!(assert_valid("a+b"), assert_valid("a b"));
         // ...and the suffix must be stable, not random per call.
         assert_eq!(assert_valid("x/y"), assert_valid("x/y"));
+    }
+}
+
+#[cfg(test)]
+mod java_heap_tests {
+    use super::{java_heap_mb, low_mem_hard_limit, JAVA_HEAP_PCT_OF_LOW_TIER};
+    use crate::policy::Tier;
+
+    /// The whole point of sizing the heap from the tier: a Low-tier JVM must be
+    /// told it can use *less* than its container, never more. The old constant
+    /// (512m) was twice the 256 MiB container and could not be honoured, so an
+    /// allocation-heavy submission was OOM-killed rather than running.
+    #[test]
+    fn low_tier_heap_stays_inside_the_container() {
+        let low_mb = low_mem_hard_limit() / (1024 * 1024);
+        let heap = java_heap_mb(&Tier::Low);
+        assert!(
+            heap < low_mb,
+            "Low-tier heap {heap}m must be strictly below the {low_mb}m container"
+        );
+        assert_eq!(heap, low_mb * JAVA_HEAP_PCT_OF_LOW_TIER / 100);
+    }
+
+    /// A JVM needs memory outside the heap (metaspace, stacks, code cache), so
+    /// the reserve has to be big enough to actually run in.
+    #[test]
+    fn low_tier_reserves_room_outside_the_heap() {
+        let low_mb = low_mem_hard_limit() / (1024 * 1024);
+        let reserve = low_mb - java_heap_mb(&Tier::Low);
+        assert!(
+            reserve >= 32,
+            "only {reserve}m left for non-heap JVM memory at a {low_mb}m tier"
+        );
+    }
+
+    /// High is unbounded, so it keeps the historical ceiling instead of none at
+    /// all - an unbounded heap lets one runaway submission take the whole host.
+    #[test]
+    fn high_tier_keeps_a_ceiling_and_is_larger_than_low() {
+        let low_mb = low_mem_hard_limit() / (1024 * 1024);
+        assert_eq!(java_heap_mb(&Tier::High), low_mb * 2);
+        assert!(java_heap_mb(&Tier::High) > java_heap_mb(&Tier::Low));
     }
 }
