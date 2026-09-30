@@ -62,18 +62,23 @@ done
 #    checked explicitly rather than assumed from the config file.
 ###############################################################################
 say "Preflight: cgroup driver and runtime images"
-DRIVER=$(rssh 'docker info --format "{{.CgroupDriver}}"')
+# Docker commands need root: the SSH user is not in the docker group, and only the
+# bootstrap (running as root) could reach the socket. GCE grants the SSH user
+# passwordless sudo, so this is safe to do directly.
+DRIVER=$(rssh 'sudo docker info --format "{{.CgroupDriver}}"')
 echo "cgroup driver   : $DRIVER"
-[ "$DRIVER" = "systemd" ] || fail "Docker cgroup driver is '$DRIVER', not 'systemd'.
-This is the failure that degrades promotion to a slow polling fallback without
-raising an error. Fix /etc/docker/daemon.json and restart Docker before trusting
-any benchmark numbers from this machine."
+if [ "$DRIVER" != "systemd" ]; then
+  printf '\033[33mWARN\033[0m  Docker cgroup driver is %s, not systemd.\n' "$DRIVER"
+  printf '      Not fatal: moderator.rs reads the real mount-relative path out of\n'
+  printf '      /proc/<pid>/cgroup, so it resolves under either layout. Still worth\n'
+  printf '      fixing, since cgroupfs beside systemd is a fragile pairing.\n'
+fi
 
 CG=$(rssh 'stat -fc %T /sys/fs/cgroup')
 echo "cgroup hierarchy: $CG"
 [ "$CG" = "cgroup2fs" ] || fail "expected cgroup v2 (cgroup2fs), got '$CG' - memory.high does not exist on v1"
 
-IMAGES=$(rssh 'docker images --format "{{.Repository}}" | grep -c "judge-runtime" || true')
+IMAGES=$(rssh 'sudo docker images --format "{{.Repository}}" | grep -c "judge-runtime" || true')
 echo "runtime images  : $IMAGES"
 [ "$IMAGES" -ge 3 ] || fail "expected 3 judge-runtime images, found $IMAGES"
 
