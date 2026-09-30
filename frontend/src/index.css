@@ -1,104 +1,107 @@
 @import "tailwindcss";
 
-/* Class-based dark mode: `.dark` is toggled on <html> */
-@custom-variant dark (&:where(.dark, .dark *));
+/* ------------------------------------------------------------------ */
+/* Theme is driven by a `data-theme` attribute on <html>.             */
+/* Default comes from the OS; an explicit toggle writes the attribute. */
+/* ------------------------------------------------------------------ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* ------------------------------------------------------------------ */
-/* Semantic color tokens (light / dark). Values per design system.     */
-/* `--canvas` / `--surface` / `--line` / `--ink` / `--ink-muted` flip  */
-/* with the `.dark` class; accent + status colors are fixed (their     */
-/* meaning does not shift between modes, only their context of use).   */
+/* Color tokens. Components never hardcode a color — they reference    */
+/* these variables (directly or through the Tailwind mapping below).   */
+/*                                                                     */
+/* Two chromatic hues exist per screen:                                */
+/*   --accent  (orange) — the single best result + active/selected     */
+/*   --danger  (muted red) — failing verdicts only                     */
+/* `--accent-ink` is the same accent hue, darkened only where small    */
+/* accent text or a solid fill must clear WCAG AA on --bg.             */
+/* `--on-accent` is the neutral foreground placed on accent fills.     */
 /* ------------------------------------------------------------------ */
 
 :root {
-  --canvas: #fafbfb;
-  --surface: #ffffff;
-  --line: #e4e8e8;
-  --ink: #1a2323;
-  --ink-muted: #5c6b6b;
-
-  /* Fixed semantic palette (shared across modes) */
-  --accent: #0ea5a5; /* teal — brand/primary actions + active controls ONLY */
-  --success: #3fb56f; /* Accepted / Light tier / backend Online */
-  --danger: #e0574c; /* Wrong Answer / Runtime Error / Offline / errors */
-  --warning: #e0a83f; /* Time Limit Exceeded / backend Checking */
-  --heavy: #8c6fe0; /* Memory Limit Exceeded / Heavy tier */
-  --on-accent: #0b2a2a; /* dark foreground placed on accent surfaces (AA) */
+  --bg: #f5f1e8;
+  --fg: #1a1a18;
+  --mute: #6b675c;
+  --rule: #d3ccba;
+  --accent: #b45f06;
+  --accent-ink: #8f4a04;
+  --danger: #b3261e;
+  --on-accent: #f5f1e8;
+  /* Single restrained string color for the code editor (low chroma). */
+  --syntax-string: #4a6b45;
 }
 
-.dark {
-  --canvas: #0f1414;
-  --surface: #161d1d;
-  --line: #283333;
-  --ink: #eaf0f0;
-  --ink-muted: #8fa0a0;
+[data-theme="dark"] {
+  --bg: #0d0e0d;
+  --fg: #e8e6df;
+  --mute: #8a877e;
+  --rule: #2a2b29;
+  --accent: #ff9f1c;
+  --accent-ink: #ff9f1c;
+  --danger: #e0574c;
+  --on-accent: #0d0e0d;
+  --syntax-string: #8fae86;
 }
 
 /* ------------------------------------------------------------------ */
-/* Tailwind theme mapping so tokens become utilities: bg-canvas,       */
-/* bg-surface, border-line, text-ink, text-ink-muted, bg-accent,       */
-/* text-success, border-danger/30, etc. (`inline` keeps the var() so   */
-/* the .dark override applies at the point of use).                    */
+/* Tailwind mapping: bg-bg, text-fg, text-mute, border-rule,           */
+/* bg-accent, text-accent-ink, text-danger, text-on-accent, ...        */
+/* `inline` keeps the var() reference so a theme swap at runtime       */
+/* re-resolves every utility at the point of use.                      */
 /* ------------------------------------------------------------------ */
 
 @theme inline {
-  --color-canvas: var(--canvas);
-  --color-surface: var(--surface);
-  --color-line: var(--line);
-  --color-ink: var(--ink);
-  --color-ink-muted: var(--ink-muted);
-
+  --color-bg: var(--bg);
+  --color-fg: var(--fg);
+  --color-mute: var(--mute);
+  --color-rule: var(--rule);
   --color-accent: var(--accent);
-  --color-on-accent: var(--on-accent);
-  --color-success: var(--success);
+  --color-accent-ink: var(--accent-ink);
   --color-danger: var(--danger);
-  --color-warning: var(--warning);
-  --color-heavy: var(--heavy);
+  --color-on-accent: var(--on-accent);
 
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas,
-    monospace;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
+    serif;
 }
 
-/* ------------------------------------------------------------------ */
-/* Base                                                            */
-/* ------------------------------------------------------------------ */
-
 @layer base {
-  html {
+  :root {
     color-scheme: light;
   }
-  html.dark {
+  [data-theme="dark"] {
     color-scheme: dark;
   }
 
   body {
-    background-color: var(--canvas);
-    color: var(--ink);
+    background-color: var(--bg);
+    color: var(--fg);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
 
+  /* Neutral, muted selection everywhere (never the accent). */
   ::selection {
-    background-color: color-mix(in srgb, var(--accent) 26%, transparent);
-    color: var(--ink);
+    background-color: color-mix(in srgb, var(--mute) 40%, transparent);
+    color: var(--fg);
   }
 
-  /* Thin, quiet scrollbars that match the hairline palette */
+  /* Thin, quiet scrollbars that match the hairline palette. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--line) transparent;
+    scrollbar-color: var(--rule) transparent;
   }
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--line);
+    background: var(--rule);
     border: 3px solid transparent;
-    border-radius: 6px;
+    border-radius: 0;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-track {
@@ -106,24 +109,53 @@
   }
 }
 
+@layer components {
+  /* Small uppercase mono labels with tracked letters. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Tabular figures: numbers never shift width. */
+  .number {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Serif display face for page and problem headings. Normal tracking and a
+     relaxed line height so the glyphs are not visually compressed. */
+  .serif-display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-optical-sizing: auto;
+    line-height: 1.12;
+    letter-spacing: normal;
+  }
+  /* Thin strokes shimmer less when nudged heavier on dark. */
+  [data-theme="dark"] .serif-display {
+    font-weight: 500;
+  }
+}
+
 /* ------------------------------------------------------------------ */
-/* Single deliberate motion: result reveal after running code.        */
+/* Single deliberate motion: result reveal after running code.         */
 /* Disabled under prefers-reduced-motion.                             */
 /* ------------------------------------------------------------------ */
 
 @keyframes raas-reveal {
   from {
     opacity: 0;
-    transform: translateY(5px);
   }
   to {
     opacity: 1;
-    transform: none;
   }
 }
 
 .reveal {
-  animation: raas-reveal 0.3s ease-out both;
+  animation: raas-reveal 0.25s ease-out both;
 }
 
 @media (prefers-reduced-motion: reduce) {

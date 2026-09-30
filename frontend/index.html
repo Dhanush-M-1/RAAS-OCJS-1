@@ -5,22 +5,40 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#fafbfb" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0f1414" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f5f1e8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0e0d" media="(prefers-color-scheme: dark)" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400..600&display=swap"
+      rel="stylesheet"
+    />
     <title>RAAS-OJS · Resource-Aware Adaptive Scheduling</title>
     <script>
       // Apply the persisted/system theme before first paint to avoid a flash.
       ;(function () {
+        var theme = 'dark'
         try {
           var stored = localStorage.getItem('raas-theme')
-          var dark =
-            stored === 'dark' ||
-            (stored !== 'light' &&
-              window.matchMedia('(prefers-color-scheme: dark)').matches)
-          document.documentElement.classList.toggle('dark', dark)
+          if (stored === 'light' || stored === 'dark') {
+            theme = stored
+          } else {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+          }
         } catch (e) {
-          /* localStorage unavailable — fall back to default light */
+          /* storage unavailable — dark is the primary theme */
         }
+        document.documentElement.setAttribute('data-theme', theme)
       })()
     </script>
   </head>

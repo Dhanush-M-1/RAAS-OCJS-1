@@ -3,20 +3,16 @@ import { useTheme } from "../theme";
 function SunIcon() {
   return (
     <svg
-      width="16"
-      height="16"
+      width="15"
+      height="15"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="1.6"
       strokeLinecap="round"
       aria-hidden="true"
     >
-      <circle
-        cx="12"
-        cy="12"
-        r="4"
-      />
+      <circle cx="12" cy="12" r="4" />
       <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
     </svg>
   );
@@ -25,12 +21,12 @@ function SunIcon() {
 function MoonIcon() {
   return (
     <svg
-      width="16"
-      height="16"
+      width="15"
+      height="15"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="1.6"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -40,10 +36,11 @@ function MoonIcon() {
   );
 }
 
+/** Hairline-outlined square control; the icon only mirrors the active theme. */
 export default function ThemeToggle() {
   const { theme, toggle } = useTheme();
   const isDark = theme === "dark";
-  const label = isDark ? "Switch to light mode" : "Switch to dark mode";
+  const label = isDark ? "Switch to light theme" : "Switch to dark theme";
 
   return (
     <button
@@ -51,7 +48,7 @@ export default function ThemeToggle() {
       onClick={toggle}
       aria-label={label}
       title={label}
-      className="inline-flex h-8 w-8 items-center justify-center rounded border border-line bg-surface text-ink-muted transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+      className="inline-flex h-7 w-7 items-center justify-center border border-rule text-mute transition-colors hover:border-fg hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
       {isDark ? <SunIcon /> : <MoonIcon />}
     </button>

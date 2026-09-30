@@ -1,163 +1,193 @@
-import { useState } from 'react'
+import { useState } from "react";
 import {
   Bar,
   BarChart,
+  Cell,
   CartesianGrid,
   LabelList,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
-} from 'recharts'
-import { useTheme } from '../theme'
-import { tierTone } from '../status'
-import StatusChip from './StatusChip'
-import { chartTokens } from '../chartTokens'
+} from "recharts";
+import { useTheme } from "../theme";
+import { chartTokens } from "../chartTokens";
+import {
+  METRIC_LABELS,
+  formatMetricValue,
+  labelOf,
+  metricValue,
+  tierLabel,
+  type ComparisonMetric,
+  type JudgeResult,
+} from "../judge";
 
-export interface StrategyDatum {
-  strategy: string
-  tier: string
-  tier_promoted?: boolean
-  value: number
-  allocated_mb?: number
-  used_mb?: number
-  allocated_str?: string
-  used_str?: string
-  is_uncapped?: boolean
+interface StrategyRow {
+  name: string;
+  verdict: string;
+  tier: string;
+  value: number;
+  usedMb: number;
+  allocatedMb: number;
+  isBest: boolean;
+  valueText: string;
+}
+
+interface TooltipProps {
+  active?: boolean;
+  payload?: ReadonlyArray<{ payload: StrategyRow }>;
+  metric: ComparisonMetric;
+}
+
+function StrategyTooltip({ active, payload, metric }: TooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
+  const row = payload[0].payload;
+  return (
+    <div className="border border-rule bg-bg px-3 py-2">
+      <div className="eyebrow text-mute">{row.name}</div>
+      <div className="eyebrow mt-1 text-fg">{row.verdict}</div>
+      <div className="eyebrow mt-1 text-mute">{row.tier}</div>
+      <div className="eyebrow number mt-1 text-fg">
+        {metric === "memory"
+          ? `${row.usedMb.toFixed(2)} MB used`
+          : row.valueText}
+      </div>
+    </div>
+  );
 }
 
 interface StrategyBarChartProps {
-  data: StrategyDatum[]
-  metric?: string
-  metricLabel: string
-  formatValue: (value: number) => string
-  tierLabelFn: (tier: string) => string
+  results: JudgeResult[];
+  metric: ComparisonMetric;
+  bestApproach: string;
 }
 
-interface ChartTooltipProps {
-  active?: boolean
-  payload?: ReadonlyArray<{ payload: StrategyDatum }>
-  formatValue: (value: number) => string
-  tierLabelFn: (tier: string) => string
-  isMemory?: boolean
-}
-
-function ChartTooltip({ active, payload, formatValue, tierLabelFn, isMemory }: ChartTooltipProps) {
-  if (!active || !payload || payload.length === 0) return null
-  const d = payload[0].payload
-  const tier = d.tier_promoted
-    ? `${tierLabelFn(d.tier)} → ${tierLabelFn('high')}`
-    : tierLabelFn(d.tier)
-  return (
-    <div className="rounded border border-line bg-surface px-3 py-2">
-      <div className="capitalize text-xs font-medium text-ink">{d.strategy}</div>
-      <div className="mt-1 flex items-center gap-2">
-        <StatusChip tone={tierTone(d.tier_promoted ? 'high' : d.tier)} mono={false}>
-          {tier}
-        </StatusChip>
-      </div>
-      {isMemory ? (
-        <div className="mt-2 flex flex-col gap-1 font-mono text-xs">
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-ink-muted">Allocated:</span>
-            <span className="font-semibold text-ink">{d.allocated_str ?? `${d.allocated_mb} MB`}</span>
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-ink-muted">Used:</span>
-            <span className="font-semibold text-ink">{d.used_str ?? `${d.used_mb} MB`}</span>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-1">
-          <span className="font-mono text-xs text-ink-muted tabular-nums">{formatValue(d.value)}</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
+/**
+ * Strategy comparison bars. Color carries meaning only: the single best
+ * strategy is the one accent bar, every other bar is --mute.
+ */
 export default function StrategyBarChart({
-  data,
+  results,
   metric,
-  metricLabel,
-  formatValue,
-  tierLabelFn,
+  bestApproach,
 }: StrategyBarChartProps) {
-  const { theme } = useTheme()
-  const tokens = chartTokens(theme)
-  const isMemory = metric === 'memory'
-
+  const { theme } = useTheme();
+  const tokens = chartTokens();
+  const memory = metric === "memory";
   const [reduceMotion] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-  )
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+
+  const rows: StrategyRow[] = results.map((r) => {
+    const used = r.peak_memory_bytes;
+    const allocated =
+      r.allocated_memory_bytes && r.allocated_memory_bytes > 0
+        ? r.allocated_memory_bytes
+        : 256 * 1024 * 1024;
+    const value = metricValue(r, metric);
+    return {
+      name: labelOf(r),
+      verdict: r.verdict,
+      tier: r.tier_promoted
+        ? `${tierLabel(r.tier_started)} \u2192 Heavy`
+        : tierLabel(r.tier_started),
+      value,
+      usedMb: used / (1024 * 1024),
+      allocatedMb: allocated / (1024 * 1024),
+      isBest: r.approach === bestApproach,
+      valueText: formatMetricValue(value, metric),
+    };
+  });
 
   return (
-    <div className="flex flex-col gap-3" aria-label={`${metricLabel} across strategies`}>
-      {isMemory && (
-        <div className="flex items-center justify-end gap-5 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm border border-line bg-surface" />
-            <span className="text-ink-muted">Memory Allocated</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm bg-accent" />
-            <span className="font-medium text-ink">Memory Used</span>
-          </div>
-        </div>
-      )}
-      <div className="h-[220px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="22%">
-            <CartesianGrid vertical={false} stroke={tokens.line} />
+    <div
+      className="flex flex-col gap-3"
+      data-chart-theme={theme}
+      aria-label={`${METRIC_LABELS[metric]} across strategies`}
+    >
+      <div className="flex items-center justify-end gap-5">
+        {memory ? (
+          <span className="eyebrow flex items-center gap-2 text-mute">
+            <span className="inline-block h-2 w-2 border border-mute" />
+            allocated
+          </span>
+        ) : null}
+        <span className="eyebrow flex items-center gap-2 text-mute">
+          <span className="inline-block h-2 w-2 bg-mute" />
+          strategy
+        </span>
+        <span className="eyebrow flex items-center gap-2 text-mute">
+          <span className="inline-block h-2 w-2 bg-accent" />
+          best
+        </span>
+      </div>
+
+      <div className="h-[240px] w-full">
+        <ResponsiveContainer
+          width="100%"
+          height="100%"
+        >
+          <BarChart
+            data={rows}
+            margin={{ top: 16, right: 8, bottom: 0, left: 0 }}
+            barCategoryGap="24%"
+          >
+            <CartesianGrid
+              vertical={false}
+              stroke={tokens.rule}
+            />
             <XAxis
-              dataKey="strategy"
+              dataKey="name"
               interval={0}
               tickLine={false}
-              axisLine={{ stroke: tokens.line }}
-              tick={{ fill: tokens.ink, fontSize: 12 }}
+              axisLine={{ stroke: tokens.rule }}
+              tick={{ fill: tokens.fg, fontSize: 11 }}
               tickMargin={8}
             />
             <YAxis
               width={72}
               tickLine={false}
-              axisLine={{ stroke: tokens.line }}
-              tick={{ fill: tokens.inkMuted, fontSize: 11 }}
-              tickFormatter={(value: number) => (isMemory ? `${value} MiB` : formatValue(value))}
-            />
-            <Tooltip
-              cursor={{ fill: tokens.line, opacity: 0.35 }}
-              content={
-                <ChartTooltip
-                  formatValue={formatValue}
-                  tierLabelFn={tierLabelFn}
-                  isMemory={isMemory}
-                />
+              axisLine={{ stroke: tokens.rule }}
+              tick={{ fill: tokens.mute, fontSize: 10 }}
+              tickFormatter={(value: number) =>
+                memory ? `${value} MB` : formatMetricValue(value, metric)
               }
             />
-            {isMemory ? (
+            <Tooltip
+              cursor={{ fill: tokens.rule, opacity: 0.3 }}
+              content={<StrategyTooltip metric={metric} />}
+            />
+            {memory ? (
               <>
                 <Bar
-                  dataKey="allocated_mb"
-                  name="Allocated"
-                  fill={tokens.line}
-                  stroke={tokens.inkMuted}
+                  dataKey="allocatedMb"
+                  name="allocated"
+                  fill={tokens.rule}
+                  stroke={tokens.mute}
                   radius={0}
                   maxBarSize={36}
                   isAnimationActive={!reduceMotion}
                 />
                 <Bar
-                  dataKey="used_mb"
-                  name="Used"
-                  fill={tokens.accent}
+                  dataKey="usedMb"
+                  name="used"
                   radius={0}
                   maxBarSize={36}
                   isAnimationActive={!reduceMotion}
                 >
+                  {rows.map((row) => (
+                    <Cell
+                      key={row.name}
+                      fill={row.isBest ? tokens.accent : tokens.mute}
+                    />
+                  ))}
                   <LabelList
-                    dataKey="used_mb"
+                    dataKey="usedMb"
                     position="top"
-                    formatter={(value) => `${Number(value).toFixed(2)} MiB`}
-                    fill={tokens.inkMuted}
+                    formatter={(value) => `${Number(value).toFixed(1)}`}
+                    fill={tokens.mute}
                     fontSize={10}
                   />
                 </Bar>
@@ -165,16 +195,23 @@ export default function StrategyBarChart({
             ) : (
               <Bar
                 dataKey="value"
-                fill={tokens.accent}
                 radius={0}
                 maxBarSize={64}
                 isAnimationActive={!reduceMotion}
               >
+                {rows.map((row) => (
+                  <Cell
+                    key={row.name}
+                    fill={row.isBest ? tokens.accent : tokens.mute}
+                  />
+                ))}
                 <LabelList
                   dataKey="value"
                   position="top"
-                  formatter={(value) => formatValue(Number(value))}
-                  fill={tokens.inkMuted}
+                  formatter={(value) =>
+                    formatMetricValue(Number(value), metric)
+                  }
+                  fill={tokens.mute}
                   fontSize={10}
                 />
               </Bar>
@@ -182,23 +219,6 @@ export default function StrategyBarChart({
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <div className="grid grid-cols-4 gap-px border border-line bg-line">
-        {data.map((d) => (
-          <div
-            key={d.strategy}
-            className="flex min-w-0 flex-col items-center gap-1.5 bg-surface px-2 py-2"
-          >
-            <span className="max-w-full truncate text-[11px] capitalize text-ink-muted">
-              {d.strategy}
-            </span>
-            <StatusChip tone={tierTone(d.tier_promoted ? 'high' : d.tier)} mono={false}>
-              {d.tier_promoted
-                ? `${tierLabelFn(d.tier)} → ${tierLabelFn('high')}`
-                : tierLabelFn(d.tier)}
-            </StatusChip>
-          </div>
-        ))}
-      </div>
     </div>
-  )
+  );
 }

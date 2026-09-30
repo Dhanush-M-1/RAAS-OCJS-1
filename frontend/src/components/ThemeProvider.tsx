@@ -1,26 +1,44 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  STORAGE_KEY,
   ThemeContext,
-  applyDocumentClass,
+  applyDocumentTheme,
   initialTheme,
+  readStoredTheme,
   type Theme,
 } from '../theme'
 
 export default function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(initialTheme)
+  // Until the user chooses explicitly, follow the OS preference.
+  const explicit = useRef<boolean>(
+    typeof window !== 'undefined' && readStoredTheme() !== null,
+  )
 
-  // Keep the <html>.dark class in sync and persist the choice.
   useEffect(() => {
-    applyDocumentClass(theme)
+    applyDocumentTheme(theme)
+  }, [theme])
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => {
+      if (!explicit.current) setThemeState(query.matches ? 'dark' : 'light')
+    }
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  const setTheme = (next: Theme) => {
+    explicit.current = true
     try {
-      localStorage.setItem('raas-theme', theme)
+      localStorage.setItem(STORAGE_KEY, next)
     } catch {
       /* non-fatal */
     }
-  }, [theme])
+    setThemeState(next)
+  }
 
-  const setTheme = (t: Theme) => setThemeState(t)
-  const toggle = () => setThemeState((p) => (p === 'dark' ? 'light' : 'dark'))
+  const toggle = () => setTheme(theme === 'dark' ? 'light' : 'dark')
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme, toggle }}>
