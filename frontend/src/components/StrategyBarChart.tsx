@@ -17,6 +17,7 @@ import { chartTokens } from '../chartTokens'
 export interface StrategyDatum {
   strategy: string
   tier: string
+  tier_promoted?: boolean
   value: number
   allocated_mb?: number
   used_mb?: number
@@ -44,12 +45,15 @@ interface ChartTooltipProps {
 function ChartTooltip({ active, payload, formatValue, tierLabelFn, isMemory }: ChartTooltipProps) {
   if (!active || !payload || payload.length === 0) return null
   const d = payload[0].payload
+  const tier = d.tier_promoted
+    ? `${tierLabelFn(d.tier)} → ${tierLabelFn('high')}`
+    : tierLabelFn(d.tier)
   return (
     <div className="rounded border border-line bg-surface px-3 py-2">
       <div className="capitalize text-xs font-medium text-ink">{d.strategy}</div>
       <div className="mt-1 flex items-center gap-2">
-        <StatusChip tone={tierTone(d.tier)} mono={false}>
-          {tierLabelFn(d.tier)}
+        <StatusChip tone={tierTone(d.tier_promoted ? 'high' : d.tier)} mono={false}>
+          {tier}
         </StatusChip>
       </div>
       {isMemory ? (
@@ -187,8 +191,10 @@ export default function StrategyBarChart({
             <span className="max-w-full truncate text-[11px] capitalize text-ink-muted">
               {d.strategy}
             </span>
-            <StatusChip tone={tierTone(d.tier)} mono={false}>
-              {tierLabelFn(d.tier)}
+            <StatusChip tone={tierTone(d.tier_promoted ? 'high' : d.tier)} mono={false}>
+              {d.tier_promoted
+                ? `${tierLabelFn(d.tier)} → ${tierLabelFn('high')}`
+                : tierLabelFn(d.tier)}
             </StatusChip>
           </div>
         ))}

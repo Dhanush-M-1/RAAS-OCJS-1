@@ -276,6 +276,7 @@ function JudgePage() {
         return {
           strategy: r.approach,
           tier: r.tier_started,
+          tier_promoted: r.tier_promoted,
           value: val,
           allocated_mb: allocatedMb,
           used_mb: used / (1024 * 1024),
