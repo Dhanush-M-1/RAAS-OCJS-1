@@ -57,10 +57,12 @@ tpl = open(os.environ["TEMPLATE"]).read()
 tpl = tpl.replace("${repo_url}", os.environ["REPO_URL"])
 tpl = tpl.replace("${repo_ref}", os.environ["REPO_REF"])
 tpl = tpl.replace("${low_tier_mb}", os.environ["LOW_TIER_MB"])
-# Terraform escapes nothing else here, but assert loudly if a placeholder survives
-# rather than shipping a script that would expand to an empty string on the host.
-leftover = [l for l in tpl.splitlines() if "${" in l and "RAAS_AUTH" not in l]
-assert not leftover, "unsubstituted placeholder(s):\n" + "\n".join(leftover)
+
+# Check for the specific Terraform placeholders rather than any "${" occurrence:
+# the script legitimately contains shell expansions such as "${HOME:-/root}",
+# and flagging those would fail on a valid render.
+leftover = [p for p in ("${repo_url}", "${repo_ref}", "${low_tier_mb}") if p in tpl]
+assert not leftover, "unsubstituted placeholder(s): " + ", ".join(leftover)
 print(tpl, end="")
 PY
 
