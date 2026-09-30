@@ -11,7 +11,7 @@
 /* these variables (directly or through the Tailwind mapping below).   */
 /*                                                                     */
 /* Two chromatic hues exist per screen:                                */
-/*   --accent  (orange) — the single best result + active/selected     */
+/*   --accent  (teal) — the single best result + active/selected       */
 /*   --danger  (muted red) — failing verdicts only                     */
 /* `--accent-ink` is the same accent hue, darkened only where small    */
 /* accent text or a solid fill must clear WCAG AA on --bg.             */
@@ -23,12 +23,12 @@
   --fg: #1a1a18;
   --mute: #6b675c;
   --rule: #d3ccba;
-  --accent: #b45f06;
-  --accent-ink: #8f4a04;
+  --accent: #0b5f59;
+  --accent-ink: #0b5f59;
   --danger: #b3261e;
   --on-accent: #f5f1e8;
   /* Single restrained string color for the code editor (low chroma). */
-  --syntax-string: #4a6b45;
+  --syntax-string: #4b5a8f;
 }
 
 [data-theme="dark"] {
@@ -36,11 +36,11 @@
   --fg: #e8e6df;
   --mute: #8a877e;
   --rule: #2a2b29;
-  --accent: #ff9f1c;
-  --accent-ink: #ff9f1c;
+  --accent: #3fc9c0;
+  --accent-ink: #3fc9c0;
   --danger: #e0574c;
   --on-accent: #0d0e0d;
-  --syntax-string: #8fae86;
+  --syntax-string: #9db0e0;
 }
 
 /* ------------------------------------------------------------------ */
