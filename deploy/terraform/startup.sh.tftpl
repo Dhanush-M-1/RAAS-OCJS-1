@@ -12,6 +12,11 @@ set -euo pipefail
 LOG=/var/log/raas-bootstrap.log
 exec > >(tee -a "$LOG") 2>&1
 
+# Google's metadata startup script runs with a minimal environment in which HOME
+# is not set. Under `set -u` that turns any reference to it into a fatal error,
+# so pin what we need explicitly rather than trusting the inherited environment.
+export HOME="${HOME:-/root}"
+
 REPO_URL="${repo_url}"
 REPO_REF="${repo_ref}"
 LOW_TIER_MB="${low_tier_mb}"
@@ -77,8 +82,15 @@ fi
 ###############################################################################
 mkdir -p "$APP_DIR"
 if [ ! -d "$APP_DIR/.git" ]; then
-  git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$APP_DIR"
+  git clone --branch "$REPO_REF" "$REPO_URL" "$APP_DIR"
 fi
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+# Always land on the current tip. Without this a re-run silently keeps whatever
+# commit the first clone happened to catch, which is how the checkout quietly
+# drifts from the repository and the script then fails on a file that exists
+# upstream but not here.
+git -C "$APP_DIR" fetch origin --quiet
+git -C "$APP_DIR" reset --hard "origin/$REPO_REF"
 cd "$APP_DIR"
 
 ###############################################################################
@@ -109,11 +121,16 @@ fi
 ###############################################################################
 # 4. Rust toolchain and the judge binary
 ###############################################################################
-if ! command -v cargo >/dev/null 2>&1; then
+# Install into fixed locations rather than $HOME/.cargo: the startup environment
+# has no HOME, and this keeps the toolchain path identical whether the script is
+# run by cloud-init or by hand.
+export CARGO_HOME=/usr/local/cargo
+export RUSTUP_HOME=/usr/local/rustup
+export PATH="$CARGO_HOME/bin:$PATH"
+if [ ! -x "$CARGO_HOME/bin/cargo" ]; then
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --profile minimal --default-toolchain stable
+    | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path
 fi
-. "$HOME/.cargo/env"
 cargo build --release --manifest-path "$APP_DIR/server/Cargo.toml"
 
 ###############################################################################
