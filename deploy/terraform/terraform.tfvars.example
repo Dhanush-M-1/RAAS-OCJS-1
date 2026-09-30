@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars and fill in project_id, then run:
+#   terraform init && terraform apply
+#
+# terraform.tfvars is gitignored. Do not commit it.
+
+project_id = "raas-ocjs"
+
+# Mumbai. Closest of the E2 regions to a client in India, at roughly 20% over
+# us-central1 (about 8 US cents across a 3 hour run).
+region = "asia-south1"
+zone   = "asia-south1-a"
+
+instance_name = "raas-judge"
+machine_type  = "e2-standard-4"
+
+# The Rust build tree plus three runtime images need room. 30 GiB is comfortable.
+boot_disk_size_gb = 30
+
+low_tier_mb = 256
+
+# Leave both empty unless you have a specific reason.
+#
+# ssh_source_ranges   - SSH is already available over IAP. Opening 22 to the
+#                       internet removes the main protection for no benefit.
+# judge_source_ranges - The judge compiles and executes arbitrary code. Reaching
+#                       it over an IAP tunnel is the default for a reason. If the
+#                       React frontend must call it directly, put a single narrow
+#                       CIDR here, never 0.0.0.0/0.
+ssh_source_ranges   = []
+judge_source_ranges = []

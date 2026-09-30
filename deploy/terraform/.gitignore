@@ -1,0 +1,12 @@
+# Terraform state and local variable files must never be committed. State can
+# contain resource attributes that are sensitive, and tfvars frequently holds
+# project identifiers.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json

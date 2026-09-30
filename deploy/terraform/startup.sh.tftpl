@@ -1,0 +1,157 @@
+#!/bin/bash
+###############################################################################
+# RAAS-OCJS judge bootstrap, run once as root on first boot.
+#
+# Everything here is preparation only. The judge service is installed and
+# enabled but NOT started: it must not come up before a shared secret exists,
+# because an unauthenticated judge executes whatever it is sent. The deploy
+# script writes /etc/raas/judge.env and starts the unit after a preflight check.
+###############################################################################
+set -euo pipefail
+
+LOG=/var/log/raas-bootstrap.log
+exec > >(tee -a "$LOG") 2>&1
+
+REPO_URL="${repo_url}"
+REPO_REF="${repo_ref}"
+LOW_TIER_MB="${low_tier_mb}"
+APP_DIR=/opt/raas
+
+echo "=== RAAS bootstrap starting at $(date -Is) ==="
+
+###############################################################################
+# 1. Docker, pinned to the systemd cgroup driver
+#
+# This is the single highest-risk step. The judge reads /proc/<pid>/cgroup and
+# expects a systemd-style path (/system.slice/docker-<id>.scope). With Docker's
+# default cgroupfs driver the path is /docker/<id> instead, the primary lookup
+# misses, and promotion silently degrades to a slow `docker exec` poll with no
+# error surfaced. Pinning the driver here is what prevents that.
+###############################################################################
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y ca-certificates curl git jq unzip build-essential
+
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+
+. /etc/os-release
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" \
+  > /etc/apt/sources.list.d/docker.list
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
+
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'JSON'
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+JSON
+
+systemctl enable docker
+systemctl restart docker
+
+# Confirm the driver actually took effect rather than assuming it did.
+DRIVER=$(docker info --format '{{.CgroupDriver}}' 2>/dev/null || echo unknown)
+echo "[verify] docker cgroup driver = $DRIVER"
+if [ "$DRIVER" != "systemd" ]; then
+  echo "[FATAL] Docker is using the '$DRIVER' cgroup driver, not 'systemd'."
+  echo "[FATAL] The judge's /proc/<pid>/cgroup lookup will miss and promotion will"
+  echo "[FATAL] silently fall back to polling. Refusing to continue."
+  exit 1
+fi
+
+# cgroup v2 must be the unified hierarchy; v1 has no memory.high to arm.
+CG_VERSION=$(stat -fc %T /sys/fs/cgroup)
+echo "[verify] cgroup filesystem = $CG_VERSION"
+if [ "$CG_VERSION" != "cgroup2fs" ]; then
+  echo "[FATAL] Expected the cgroup v2 unified hierarchy (cgroup2fs), found '$CG_VERSION'."
+  exit 1
+fi
+
+###############################################################################
+# 2. Source
+###############################################################################
+mkdir -p "$APP_DIR"
+if [ ! -d "$APP_DIR/.git" ]; then
+  git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$APP_DIR"
+fi
+cd "$APP_DIR"
+
+###############################################################################
+# 3. Judge runtime images
+#
+# These are built locally and are not published to any registry, so they have
+# to exist on the host before the judge can grade anything.
+###############################################################################
+docker build -t python-judge-runtime "$APP_DIR/server/runtimes/python"
+docker build -t cpp-judge-runtime    "$APP_DIR/server/runtimes/cpp"
+docker build -t java-judge-runtime   "$APP_DIR/server/runtimes/java"
+
+###############################################################################
+# 3b. Prove the cgroup mechanism before spending time on the Rust build.
+#
+# This runs against a real container rather than trusting the daemon config: it
+# resolves the cgroup the way moderator.rs does, writes memory.high, and makes
+# the container exceed it to confirm the kernel raises the pressure counter that
+# reactive promotion waits on. A host that fails here would produce believable
+# but wrong benchmark numbers, so the bootstrap refuses to continue.
+###############################################################################
+if ! bash "$APP_DIR/deploy/cgroup_probe.sh"; then
+  echo "[FATAL] The cgroup probe failed, so promotion cannot work on this host."
+  echo "[FATAL] Benchmarking here would produce plausible but wrong results."
+  exit 1
+fi
+
+###############################################################################
+# 4. Rust toolchain and the judge binary
+###############################################################################
+if ! command -v cargo >/dev/null 2>&1; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain stable
+fi
+. "$HOME/.cargo/env"
+cargo build --release --manifest-path "$APP_DIR/server/Cargo.toml"
+
+###############################################################################
+# 5. Service definition
+#
+# No User= directive, so this runs as root. That is required, not incidental:
+# writing memory.high under /sys/fs/cgroup fails with EACCES for an unprivileged
+# process, the kernel never increments the pressure counters, and reactive
+# promotion never fires.
+###############################################################################
+mkdir -p /etc/raas
+install -m 0755 "$APP_DIR/server/target/release/server" /usr/local/bin/raas-judge
+
+cat > /etc/systemd/system/raas-judge.service <<UNIT
+[Unit]
+Description=RAAS-OCJS adaptive tiering judge
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=$APP_DIR
+Environment=RAAS_BIND=0.0.0.0:3000
+Environment=LOW_TIER_MB=$LOW_TIER_MB
+# Holds RAAS_AUTH_TOKEN. Written by the deploy step, never by Terraform, so the
+# secret never lands in terraform.tfstate.
+EnvironmentFile=/etc/raas/judge.env
+ExecStart=/usr/local/bin/raas-judge
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable raas-judge
+
+echo "=== bootstrap complete at $(date -Is) ==="
+echo "The judge is installed and enabled but NOT started."
+echo "Run deploy/deploy.sh to install a shared secret and start it."
