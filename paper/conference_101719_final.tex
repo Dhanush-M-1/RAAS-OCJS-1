@@ -230,7 +230,7 @@ Java & 17 & 76.5\% & 23.9 MB & 36.8 MB & 253.7 MB \\
 
 
 \subsection{AST Feature Extraction and XGBoost Predictive Tiering}
-Before launching an execution container, RAAS-OCJS can optionally run a static code analysis pass to predict whether an incoming submission fits safely within Tier~1 (256~MiB) or should be provisioned directly with Tier~2 (2048~MiB). This predictive stage couples a Tree-sitter Abstract Syntax Tree (AST) feature extractor with in-process XGBoost classifiers \cite{chen2016xgboost}.
+Before launching an execution container, RAAS-OCJS can optionally run a static code analysis pass to predict whether an incoming submission fits safely within Tier~1 (256~MiB) or should be provisioned directly with Tier~2 (uncapped). This predictive stage couples a Tree-sitter Abstract Syntax Tree (AST) feature extractor with in-process XGBoost classifiers \cite{chen2016xgboost}.
 
 \textit{1) Static AST Feature Extraction:} Using language-specific Tree-sitter grammars compiled directly into our Rust daemon, the extractor parses source code into a concrete syntax tree in under 1.5~ms. In a single linear traversal of the tree, it computes 22 structural metrics:
 \begin{itemize}
@@ -400,7 +400,7 @@ P95 Turnaround (steady state) & 1,187.00 ms & 1,185.86 ms & negligible \\
 \end{table}
 
 \subsection{Scoreboard Freeze Rush Stress Test}
-During the final 30 seconds of a competitive programming contest, participants submit a burst of solutions simultaneously. We modeled a 500-submission flash burst using the profiles measured on our bare-metal host, run through the same simulation as Section~IV-A rather than as a live 500-submission run.
+During the final 30 seconds of a competitive programming contest, participants submit a burst of solutions simultaneously. We modeled a 500-submission flash burst using the profiles measured on our bare-metal host, run through the same simulation as Section~IV-B rather than as a live 500-submission run.
 
 \begin{table}[!t]
 \caption{500-Submission Freeze Rush Stress Test (15 GiB Host, 256 MiB Tier)}
