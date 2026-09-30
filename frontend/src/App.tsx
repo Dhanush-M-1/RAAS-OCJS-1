@@ -65,6 +65,15 @@ interface JudgeResult {
   cases: CaseResult[]
 }
 
+function orderStrategyResults(results: JudgeResult[]): JudgeResult[] {
+  return RUN_ALL.flatMap((approach) => {
+    const result = results.find(
+      (candidate) => candidate.approach.toLowerCase() === approach,
+    )
+    return result ? [result] : []
+  })
+}
+
 type ComparisonMetric = 'cpu_time_ms' | 'wall_time_ms' | 'memory'
 
 const METRICS: ComparisonMetric[] = [
@@ -226,6 +235,8 @@ function JudgePage() {
 
   async function handleRun() {
     setError(null)
+    setSingleResult(null)
+    setAllResults(null)
     setRunning(true)
     try {
       if (strategy === 'Run all four strategies') {
@@ -233,7 +244,7 @@ function JudgePage() {
         for (const s of RUN_ALL) {
           results.push(await submitOne(s))
         }
-        setAllResults(results)
+        setAllResults(orderStrategyResults(results))
         setSingleResult(null)
       } else {
         const approach = strategy === 'Baseline' ? 'baseline' : strategy.toLowerCase()
@@ -267,7 +278,7 @@ function JudgePage() {
           tier: r.tier_started,
           value: val,
           allocated_mb: allocatedMb,
-          used_mb: +(used / (1024 * 1024)).toFixed(1),
+          used_mb: used / (1024 * 1024),
           allocated_str: formatAllocatedMemory(r),
           used_str: formatBytes(used),
           is_uncapped: isUncapped,

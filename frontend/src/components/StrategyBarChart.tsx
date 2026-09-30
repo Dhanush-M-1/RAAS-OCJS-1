@@ -3,6 +3,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  LabelList,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -117,7 +118,7 @@ export default function StrategyBarChart({
               tickLine={false}
               axisLine={{ stroke: tokens.line }}
               tick={{ fill: tokens.inkMuted, fontSize: 11 }}
-              tickFormatter={(value: number) => (isMemory ? `${value} MB` : formatValue(value))}
+              tickFormatter={(value: number) => (isMemory ? `${value} MiB` : formatValue(value))}
             />
             <Tooltip
               cursor={{ fill: tokens.line, opacity: 0.35 }}
@@ -147,7 +148,15 @@ export default function StrategyBarChart({
                   radius={0}
                   maxBarSize={36}
                   isAnimationActive={!reduceMotion}
-                />
+                >
+                  <LabelList
+                    dataKey="used_mb"
+                    position="top"
+                    formatter={(value) => `${Number(value).toFixed(2)} MiB`}
+                    fill={tokens.inkMuted}
+                    fontSize={10}
+                  />
+                </Bar>
               </>
             ) : (
               <Bar
@@ -156,7 +165,15 @@ export default function StrategyBarChart({
                 radius={0}
                 maxBarSize={64}
                 isAnimationActive={!reduceMotion}
-              />
+              >
+                <LabelList
+                  dataKey="value"
+                  position="top"
+                  formatter={(value) => formatValue(Number(value))}
+                  fill={tokens.inkMuted}
+                  fontSize={10}
+                />
+              </Bar>
             )}
           </BarChart>
         </ResponsiveContainer>
