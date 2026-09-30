@@ -213,9 +213,9 @@ Navigate to `http://localhost:5173` to launch the multi-strategy visualizer.
 With the server still running, in a third terminal:
 ```bash
 # The harness defaults to a LAN IP (http://192.168.0.111:3000) — override it:
-JUDGE_URL=http://localhost:3000 python3 benchmarks/run_codenet_benchmarks.py
+JUDGE_URL=http://localhost:3000 python3 benchmarks/raas_benchmark.py all
 ```
-This streams real problems from `deepmind/code_contests`, validates each solution, and regenerates [`benchmarks/real_dataset_*.csv`](benchmarks/real_dataset_strategy_summary.csv). See [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) §7.
+This streams real problems from `deepmind/code_contests`, validates each solution, and regenerates `benchmarks/results/real_dataset_*_tier256.csv`. See [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) §7.
 
 ---
 

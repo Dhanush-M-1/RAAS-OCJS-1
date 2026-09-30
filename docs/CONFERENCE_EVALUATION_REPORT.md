@@ -530,13 +530,13 @@ docker build -t java-judge-runtime   server/runtimes/java
 (cd server && cargo build && sudo ./target/debug/server) &
 
 # 2. Drive the harness against the local daemon (it defaults to a LAN IP, so override it)
-JUDGE_URL=http://localhost:3000 python3 benchmarks/run_codenet_benchmarks.py
+JUDGE_URL=http://localhost:3000 python3 benchmarks/raas_benchmark.py all
 ```
 
 - **Judge Daemon Source**: `server/src/main.rs`, `server/src/docker.rs`, `server/src/moderator.rs`, `server/src/policy.rs`
-- **Benchmarking Engine**: `benchmarks/run_codenet_benchmarks.py`
+- **Benchmarking Engine**: `benchmarks/raas_benchmark.py` (single entry point: `preflight` / `probe` / `fetch` / `run` / `simulate` / `all`)
 - **Harness knobs**: `JUDGE_URL`, `LIGHT_TIER_MB` (must match the server's low tier), `BENCH_SEED`
-- **Empirical Execution Records (72 Runs)**: `benchmarks/real_dataset_empirical_runs.csv`
+- **Empirical Execution Records**: `benchmarks/results/real_dataset_empirical_runs_tier256.csv`
 - **Macro-Scale Strategy Summary**: `benchmarks/real_dataset_strategy_summary.csv`
 - **Granular Language Metrics**: `benchmarks/real_dataset_language_metrics.csv`
 - **Cloud Provisioning Projection**: `benchmarks/real_dataset_cloud_projection.csv`

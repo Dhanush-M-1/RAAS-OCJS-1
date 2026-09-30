@@ -4,7 +4,8 @@ RAAS-OCJS unified benchmark and test harness.
 
 This single file replaces the Python-level *benchmarking* script that used to
 live at benchmarks/run_codenet_benchmarks.py (corpus build, live runs, 10k macro
-simulation, burst stress, CSV export).
+simulation, burst stress, CSV export). That file has been removed; recover it
+from git history if the older result-generation path is ever needed.
 
 It also overlaps with model-training/extract_codecontests.py, but does NOT
 replace it: that script emits the stratified Light/Heavy *training* subset that
@@ -633,7 +634,12 @@ def cmd_fetch(args) -> int:
         f"{len(set(c['problem_name'] for c in candidates))} problems")
 
     if args.with_synthetic:
-        candidates.extend(synthetic_programs())
+        # Prepend, do not append: the collection loop below stops as soon as it
+        # has `args.count` validated submissions, and CodeContests alone always
+        # supplies more than that, so anything appended at the end is dropped
+        # before it is ever validated - making this flag a silent no-op in the
+        # exact case it exists for (covering the heavy path so promotion fires).
+        candidates = synthetic_programs() + candidates
 
     validate = not args.no_validate
     if validate and not check_judge():

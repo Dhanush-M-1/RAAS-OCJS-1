@@ -185,14 +185,14 @@ cargo build
 
 ## 6. Real-Dataset Benchmark Harness (Optional)
 
-[`benchmarks/run_codenet_benchmarks.py`](../benchmarks/run_codenet_benchmarks.py) drives the live judge with real competitive-programming problems streamed from HuggingFace and writes the `benchmarks/real_dataset_*.csv` result files.
+[`benchmarks/raas_benchmark.py`](../benchmarks/raas_benchmark.py) is the single test entry point. It drives the live judge with real competitive-programming problems streamed from HuggingFace, caches the corpus under `benchmarks/dataset/`, and writes `benchmarks/results/real_dataset_*_tier256.csv`.
 
 **Requirements:** a running judge server (see §3) and the Python dependencies from `model-training/requirements.txt`.
 
 ```bash
 # IMPORTANT: the harness defaults to a LAN IP (http://192.168.0.111:3000),
 # not localhost. Override it to point at your local server:
-JUDGE_URL=http://localhost:3000 python3 benchmarks/run_codenet_benchmarks.py
+JUDGE_URL=http://localhost:3000 python3 benchmarks/raas_benchmark.py all
 ```
 
 Environment knobs:
