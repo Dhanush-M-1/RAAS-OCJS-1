@@ -57,6 +57,10 @@ tpl = open(os.environ["TEMPLATE"]).read()
 tpl = tpl.replace("${repo_url}", os.environ["REPO_URL"])
 tpl = tpl.replace("${repo_ref}", os.environ["REPO_REF"])
 tpl = tpl.replace("${low_tier_mb}", os.environ["LOW_TIER_MB"])
+# Terraform needs `$${` to emit a literal `${`, which the startup script contains
+# for its own shell expansions. Undo that here so this renderer and Terraform
+# produce identical output.
+tpl = tpl.replace("$${", "${")
 
 # Check for the specific Terraform placeholders rather than any "${" occurrence:
 # the script legitimately contains shell expansions such as "${HOME:-/root}",

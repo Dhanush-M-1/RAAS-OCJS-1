@@ -77,6 +77,27 @@ resource "google_compute_firewall" "iap_ssh" {
   description = "SSH via Identity-Aware Proxy only."
 }
 
+# IAP forwards tcp/3000 to the VM *from* Google's IAP range, so reaching a private
+# port over a tunnel still requires a rule for it. Without this, start-iap-tunnel
+# fails with "failed to connect to backend (port 3000)" even though the service is
+# listening. Scoped to the IAP range rather than the internet: the port stays
+# unreachable from anywhere except Google's tunnel infrastructure, and only
+# principals with IAP access can use it.
+resource "google_compute_firewall" "judge_iap" {
+  name    = "${var.instance_name}-allow-iap-judge"
+  network = google_compute_network.raas.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["3000"]
+  }
+
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["raas-judge"]
+
+  description = "Judge API over IAP tunnel only. Not reachable from the internet."
+}
+
 # Optional escape hatch. Created only when judge_source_ranges is non-empty, so
 # the default posture leaves tcp/3000 closed to the world.
 resource "google_compute_firewall" "judge_api" {

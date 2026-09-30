@@ -15,7 +15,9 @@ exec > >(tee -a "$LOG") 2>&1
 # Google's metadata startup script runs with a minimal environment in which HOME
 # is not set. Under `set -u` that turns any reference to it into a fatal error,
 # so pin what we need explicitly rather than trusting the inherited environment.
-export HOME="${HOME:-/root}"
+# The doubled dollar-brace below is Terraform's escape for a literal one, so the
+# shell receives the ordinary default-if-unset expansion it expects.
+export HOME="$${HOME:-/root}"
 
 REPO_URL="${repo_url}"
 REPO_REF="${repo_ref}"
