@@ -9,7 +9,7 @@
 Traditional Online Judges (e.g., DOMjudge, DMOJ, VJudge) enforce uniform, static sandbox allocations for all submissions regardless of algorithmic behavior. A simple $O(1)$ query is assigned identical resources and cgroup ceilings as an intensive $O(N^3)$ dynamic programming problem. On fixed, self-hosted hardware without cloud elasticity, resource over-allocation throttles concurrency, while under-allocation risks premature OOM kills.
 
 **RAAS-OCJS** introduces a two-stage adaptive scheduling architecture:
-1. **Predictive Phase**: Static source code parsing via Tree-sitter and feature extraction — 22 base AST metrics + 10 engineered ratios = 32 features for the specialised per-language models, 36 for the unified model — fed into a Rust-embedded XGBoost classifier to select an initial isolation tier prior to container instantiation.
+1. **Predictive Phase**: Static source code parsing via Tree-sitter and feature extraction — 26 base AST metrics + 10 engineered ratios = 36 features for the specialised per-language models, 40 for the unified model — fed into a Rust-embedded XGBoost classifier to select an initial isolation tier prior to container instantiation.
 2. **Reactive Phase**: Continuous event-driven Linux cgroup v2 monitoring via kernel `memory.events` (specifically the `high` pressure event) and `memory.current` watermarks, dynamically migrating and scaling container resource ceilings live on-the-fly without aborting execution.
 
 
@@ -19,7 +19,7 @@ flowchart TD
 
     B["Tree-sitter Multi-AST<br/>(Python/C++/Java/C)"]:::parser
 
-    C["Rust Feature Extractor (22 base AST metrics)<br/>+ 10 engineered ratios = 32 features<br/>(36 for the unified model)"]:::processing
+    C["Rust Feature Extractor (26 base AST metrics)<br/>+ 10 engineered ratios = 36 features<br/>(40 for the unified model)"]:::processing
 
     D["Compiled XGBoost Model (m2cgen)<br/>(Zero Python runtime dependency)"]:::model
 
@@ -62,21 +62,23 @@ flowchart TD
 
 ### 2.1 Feature Extraction Pipeline (`feature-extraction-pipeline/`)
 Built with Rust and Tree-sitter bindings for multi-language AST extraction:
-- **Base AST Features (22)**:
+- **Base AST Features (26)**:
   - Loop topology: `nesting_depth`, `max_loop_depth`, `total_loops`.
   - Complexity: `cyclomatic_complexity`.
   - Recursion: `is_recursive`, `recursive_call_count`.
-  - Memory markers: `large_alloc_flag`, `total_subscripts`, `total_2d_subscripts`.
+  - Memory markers: `large_alloc_flag` (boolean, derived from the measured allocation aggregate via `AllocStats.any_large()` so its semantics are unchanged), `alloc_size_max`, `alloc_size_total`, `alloc_sites`, `alloc_unknown_sites`, `total_subscripts`, `total_2d_subscripts`.
   - Library markers: `has_heavy_datastructure` (e.g. `unordered_map`, `priority_queue`, `defaultdict`), `has_fast_io`, `has_modulo_arithmetic`, `has_bitmask_ops`, `has_graph_adjacency`.
   - Code scale: `ast_node_count`, `ast_depth`, `source_loc`, `source_chars`, `max_integer_constant`, `total_functions`, `total_calls`, `total_arithmetic_ops`.
 - **Engineered Features (10)**:
   - Densities and interaction ratios: `loop_density`, `call_density`, `subscript_density`, `branch_density`, `arithmetic_density`, `subscript_2d_ratio`, `recursion_intensity`, `log_max_constant`, `log_ast_nodes`, `log_source_chars`.
 
+The four `alloc_*` features are **measured aggregates, not booleans**: `alloc_size_max` is the largest single statically-known allocation size at any recognised site, `alloc_size_total` sums those sizes across all sites, `alloc_sites` counts recognised allocation sites, and `alloc_unknown_sites` counts sites whose size is only known at runtime. Their **units differ by language** — C `malloc`/`calloc` sizes are bytes, whereas Java/Python `new T[n]` and container capacities are element counts — which is why the fields are named `size_max`/`size_total` rather than `bytes_max`. They are deliberately not described as bytes.
+
 ### 2.2 Embedded Inference Engine (`server/src/predict.rs`)
 To keep evaluation latency low and to avoid any Python runtime overhead:
-- Offline models are trained on a DeepMind CodeContests subset (`model-training/codecontests_subset`: 30,000 files — Java/Python/C++, 10,000 each, 5,000 Light + 5,000 Heavy per language) using Python and scikit-learn/xgboost. No feature encodes total allocation bytes; the only allocation signal is the boolean `large_alloc_flag`.
-- Models are transpiled into pure Rust code via `m2cgen` (`server/src/generated/`). Only the Python, C++, Java, and unified multi-language models are exported, with calibrated decision thresholds ($0.200$ to $0.346$). Because the judge consumes these compiled modules, the feature counts (32 specialised / 36 unified) are hardcoded in **both** `model-training/regenerate_models.sh` and `server/src/predict.rs`.
-- **C submissions are scored by the C++ specialised model** at $\tau = 0.346$; `regenerate_models.sh` does not export the C-specialised model. Re-sync these thresholds from `model-training/artifacts/model_comparison.csv` after every retrain.
+- Offline models are trained with Python and scikit-learn/xgboost on **measured-memory labels**. The current corpus is `model-training/codenet_subset` (IBM Project CodeNet, `iNeil77/CodeNet` on HuggingFace): 164,686 submissions, 737 MB, spanning 2,520 unique problems, labelled Light < 25 MiB / Heavy >= 100 MiB with the ambiguous 25–100 MiB band dropped rather than guessed. The earlier data era is a DeepMind CodeContests subset (`model-training/codecontests_subset`: 30,000 files — Java/Python/C++, 10,000 each, 5,000 Light + 5,000 Heavy per language) whose Light/Heavy labels are a length/difficulty heuristic, not a measurement; source length explains only 7–18% of the variance of measured memory, which is why the label change was necessary. Allocation is now captured by four measured aggregates (`alloc_size_max`, `alloc_size_total`, `alloc_sites`, `alloc_unknown_sites`, see §2.1) in addition to the boolean `large_alloc_flag`, which is derived from them.
+- Models are transpiled into pure Rust code via `m2cgen` (`server/src/generated/`). Only the Python, C++, Java, and unified multi-language models are routed, with calibrated decision thresholds ($0.200$ to $0.346$, unified $0.319$). Because the judge consumes these compiled modules, the feature counts (36 specialised / 40 unified) are hardcoded in **four unconnected places** — `server/src/predict.rs`, `model-training/train_advanced_xgboost.py`, `model-training/regenerate_models.sh`, and the generated Rust under `server/src/generated/`; they cannot see each other. `regenerate_models.sh` verifies each trained model's own `num_features()` and refuses on mismatch rather than writing a stale artifact set.
+- **C submissions are scored by the unified multi-language model** at $\tau = 0.319$ (`THRESHOLD_UNIFIED`). A C-specialised model is trained and exported, but `predict.rs` does not route through it, so that artifact is unused and no C-specific classifier is in service. C is data-limited (only 428 Heavy examples in the 12.7M-row CodeNet scan, median C memory 0.6 MiB). Re-sync these thresholds from `model-training/artifacts/model_comparison.csv` after every retrain.
 - The judge evaluates model inference on the hot path without spawning subprocesses or loading weights dynamically. (Inference latency: UNVERIFIED - needs measurement.)
 
 ### 2.3 Container Isolation & Kernel cgroup v2 (`server/src/docker.rs`, `server/src/moderator.rs`)

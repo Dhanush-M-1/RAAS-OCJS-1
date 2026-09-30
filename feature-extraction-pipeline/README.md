@@ -7,7 +7,9 @@ file using [Tree-sitter](https://tree-sitter.github.io/), extracts multi-dimensi
 
 ## 1. Features Extracted
 
-The pipeline extracts **22 core AST and structural features** in pure Rust, and the modeling pipeline adds **10 engineered interaction ratios / log transforms**. That gives a **32-feature vector** for each per-language model; the unified multi-language model adds 4 language one-hot columns for **36 features** total.
+The pipeline extracts **26 core AST and structural features** in pure Rust, and the modeling pipeline adds **10 engineered interaction ratios / log transforms**. That gives a **36-feature vector** for each per-language model; the unified multi-language model adds 4 language one-hot columns for **40 features** total.
+
+The 26 core features plus the `parse_error_flag` quality flag and the `submission_id` / `language` / `label` metadata columns make up the **30-column CSV**. That header is now a single exported constant, `output::CSV_HEADER`, shared by the writer and every test file (see §4).
 
 ### Core AST & Structural Features (Rust Extractor)
 
@@ -21,11 +23,15 @@ The pipeline extracts **22 core AST and structural features** in pure Rust, and 
 | `cyclomatic_complexity`   | uint | Control Flow      | McCabe cyclomatic complexity = $1 +$ decision points (`if`, `for`, `while`, `case`, `&&`, `                                                                                               |     | `, ternary, `elif`). |
 | `is_recursive`            | 0/1  | Recursion         | `1` if any function directly calls itself by name inside its own body.                                                                                                                    |
 | `recursive_call_count`    | uint | Recursion         | Count of self-call sites in recursive functions. Distinguishes linear recursion ($O(N)$) from branching / tree recursion ($O(2^N)$ divide-and-conquer / backtracking).                    |
-| `large_alloc_flag`        | 0/1  | Memory Scale      | `1` if a static allocation or fixed-size global/BSS array exceeds `LARGE_ALLOC_THRESHOLD` (`1_000_000`). Units are **intentionally uniform** across languages even though the underlying APIs differ (`malloc`/`calloc` size in bytes, `new T[n]` / `.reserve(n)` / Java collection capacities / Python container repetition size in element counts); this is documented intent in the extractor, not a bug. |
+| `large_alloc_flag`        | 0/1  | Memory Scale      | `1` if a statically-known allocation exceeds `LARGE_ALLOC_THRESHOLD` (`1_000_000`). Still emitted, now **derived** via `AllocStats.any_large()` — its semantics and existing tests are unchanged. |
+| `alloc_size_max`          | uint | Memory Scale      | Largest single statically-known allocation size at any recognised site. Units differ by language (see §2), so the name is deliberately neutral (`size`, not `bytes`).                     |
+| `alloc_size_total`        | uint | Memory Scale      | Sum of the statically-known sizes across all recognised allocation sites. Same unit caveat as `alloc_size_max`.                                                                            |
+| `alloc_sites`             | uint | Memory Scale      | Number of recognised allocation sites.                                                                                                                                                    |
+| `alloc_unknown_sites`     | uint | Memory Scale      | Number of allocation sites whose size is only known at **runtime** (`malloc(n)`, `new byte[chunks]`) — precisely the case the old boolean structurally could not express.                  |
 | `has_fast_io`             | 0/1  | Input Scale       | `1` if high-throughput I/O boilerplate is detected (`sync_with_stdio`, `cin.tie`, `BufferedReader`, `StringTokenizer`, `sys.stdin.readline`), signaling large input scale ($N \ge 10^5$). |
 | `has_heavy_datastructure` | 0/1  | Collections       | `1` if heavy standard library containers are used (`unordered_map`, `priority_queue`, `BigInteger`, `defaultdict`, `heapq`, `bitset`, `multiset`).                                        |
 | `has_modulo_arithmetic`   | 0/1  | Operator Markers  | `1` if modulo (`%`) arithmetic appears — typical of hashing, number theory, and cycle-detection solutions.                                                                                |
-| `has_bitmask_ops`         | 0/1  | Operator Markers  | `1` if bitwise operators (`<<`, `>>`, `&`, `\|`, `^`, `~`) are used — typical of subset-DP and bitmask state encodings.                                                                   |
+| `has_bitmask_ops`         | 0/1  | Operator Markers  | `1` if bitwise operators (`<<`, `>>`, `&`, `\\|`, `^`, `~`) are used — typical of subset-DP and bitmask state encodings.                                                                   |
 | `has_graph_adjacency`     | 0/1  | Structure Markers | `1` if adjacency-list / adjacency-matrix construction patterns are detected — signals graph traversal workloads.                                                                          |
 | `total_functions`         | uint | Code Scale        | Total count of function, method, and constructor declarations.                                                                                                                            |
 | `total_calls`             | uint | Code Scale        | Total count of function and method call sites.                                                                                                                                            |
@@ -53,7 +59,7 @@ The pipeline extracts **22 core AST and structural features** in pure Rust, and 
 - **`log_ast_nodes`**: $\ln(1 + \text{ast\_node\_count})$
 - **`log_source_chars`**: $\ln(1 + \text{source\_chars})$
 
-> These are defined in [`train_advanced_xgboost.py`](../model-training/train_advanced_xgboost.py), **not** emitted by the Rust extractor — the extractor's CSV contains the 22 core columns plus metadata below.
+> These are defined in [`train_advanced_xgboost.py`](../model-training/train_advanced_xgboost.py), **not** emitted by the Rust extractor — the extractor's CSV contains the 26 core feature columns plus the `parse_error_flag` quality flag and the `submission_id` / `language` / `label` metadata columns (30 columns total).
 
 ---
 
@@ -68,12 +74,32 @@ The extractor evaluates static and compile-time constant arithmetic (e.g. `5 * 1
 | **Java**   | `new int[n]` array instantiations, `new ArrayList<>(capacity)`, `new HashMap<>(capacity)`.                                               |
 | **Python** | Container repetition `[x] * n` (lists/tuples/bytes), `bytearray(n)`.                                                                     |
 
-**Accepted limitation:** an allocation whose size is given by a *variable* cannot be judged
-statically and is never flagged — the extractor only knows the constant/constant-folded
-dimensions it can evaluate (see the `const_eval` doc comment). Verified behaviour: for a Java
-source containing `new byte[chunks][1024 * 1024]` where `chunks` is a variable,
-`large_alloc_flag` is `1`, because the constant inner dimension *does* exceed the threshold;
-the same source with a literal outer dimension is also `1`.
+Each recognised site feeds four measured outputs — `alloc_size_max`, `alloc_size_total`,
+`alloc_sites`, `alloc_unknown_sites` — which **replace the old single boolean as the allocation
+signal**. `alloc_unknown_sites` is the field that carries the signal the old design could not
+express: it counts allocation sites whose size is only known at **runtime** (`malloc(n)`,
+`new byte[chunks]`). A runtime-sized allocation is invisible to a static threshold — `const_eval`
+fails, so it contributes nothing to `alloc_size_max` or `alloc_size_total` and could never trip
+`large_alloc_flag` — yet it is often the allocation that actually matters. Counting the site
+recovers that information without inventing a size for it.
+
+`large_alloc_flag` is still emitted, now derived via `AllocStats.any_large()` (`size_max >
+LARGE_ALLOC_THRESHOLD`), so its semantics and existing tests hold unchanged.
+
+**Accepted limitation (and how the new fields address it):** an allocation whose size is given by
+a *variable* still cannot be *sized* statically — the extractor only knows the
+constant/constant-folded dimensions it can evaluate (see the `const_eval` doc comment). But it is
+no longer invisible: the site is counted by `alloc_unknown_sites`. Verified behaviour: for a Java
+source containing `new byte[chunks][1024 * 1024]` where `chunks` is a variable, `alloc_size_max`
+is `1024 * 1024` (the known inner dimension), `alloc_sites` is `2` (each dimension is a site),
+`alloc_unknown_sites` is `1` (the outer variable dimension), and `large_alloc_flag` is `1`,
+because the constant inner dimension *does* exceed the threshold; the same source with a literal
+outer dimension is also `1`.
+
+**Unit asymmetry (documented intent, not a bug):** the underlying APIs are not commensurable.
+C `malloc` / `calloc` sizes are **bytes**; Java / Python `new T[n]` and container capacities are
+**element counts**. The field names are therefore neutral — `alloc_size_max` / `alloc_size_total`
+rather than `bytes_max` — because calling them bytes would be a false claim.
 
 ---
 
@@ -101,6 +127,8 @@ The dataset walker traverses directory trees organized by language and resource 
 - **Resource Tier Label** is inferred from the subfolder name (`Light` or `Heavy`).
 - Deduplication is enforced on the `(submission_id, language)` composite key.
 
+Both `model-training/codecontests_subset` and `model-training/codenet_subset` follow this layout.
+
 ---
 
 ## 4. Building & Running
@@ -120,13 +148,25 @@ cargo build --release --bin OJ-feature-extraction-spike
 
 # Example (CodeContests subset produced by ../model-training/extract_codecontests.py):
 ./target/release/OJ-feature-extraction-spike ../model-training/codecontests_subset features.csv
+
+# Example (CodeNet subset produced by ../model-training/extract_codenet.py):
+./target/release/OJ-feature-extraction-spike ../model-training/codenet_subset features.csv
 ```
 
 ### Running Tests
 ```bash
 cargo test
 ```
-Runs 44 unit tests and 5 integration tests verifying feature extraction edge cases (range-for, do-while, elif chains, recursive self-calls, array sizing, and CSV serialization).
+Runs **53 tests**, all passing: **48 unit** tests, **2 CLI** tests, and **3 integration** tests,
+verifying feature extraction edge cases (range-for, do-while, elif chains, recursive self-calls,
+array sizing, and CSV serialization). The new tests cover dynamic (runtime-sized) allocation,
+magnitude capture for statically-known sizes, multi-dimensional Java arrays counting each
+dimension as a site, and a guard that non-allocating calls such as `printf` are **not** counted
+as allocation sites.
+
+The CSV header lives in one place — the exported constant `output::CSV_HEADER`, shared by the
+writer and all test files. It used to be duplicated across three files, which silently broke two
+tests whenever a column was added.
 
 ---
 
@@ -148,6 +188,8 @@ Trained with GPU-accelerated XGBoost using 5-fold **Problem-Grouped Cross-Valida
 | **Specialized Java Model**       | **$78.20\%$** _(std: 77.52%)_ | **$81.54\%$** | $82.03\%$ | $81.06\%$ | **$0.8537$** | $0.482$           |
 | **Unified Multi-Language Model** | **$83.71\%$** _(std: 83.76%)_ | **$84.81\%$** | $80.19\%$ | $89.99\%$ | **$0.9149$** | $0.457$           |
 
-All models are compiled via **m2cgen** into Rust source (`src/generated/*.rs`) by
+All models are compiled via **m2cgen** into Rust source (`server/src/generated/*.rs`) by
 [`regenerate_models.sh`](../model-training/regenerate_models.sh) and baked into the judge
-binary at build time — inference has no Python/C dependency at runtime.
+binary at build time — inference has no Python/C dependency at runtime. `regenerate_models.sh`
+verifies each trained model's own `num_features()` before writing and refuses on mismatch, so a
+feature-count drift cannot silently ship a mismatched model.

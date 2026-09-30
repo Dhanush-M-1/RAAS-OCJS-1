@@ -35,20 +35,21 @@ RAAS-OCJS evaluates four distinct scheduling paradigms against a common containe
 ### 2.2 Predictive Strategy
 - **Mechanism**: Uses pre-execution static analysis.
   1. Tree-sitter parses the source code into an Abstract Syntax Tree.
-  2. Feature extractor scans the AST in a single pass to compute 22 structural metrics; the training pipeline then adds 10 engineered density ratios (32 features per language, 36 for the unified model).
+  2. Feature extractor scans the AST in a single pass to compute 26 structural metrics, including four measured allocation aggregates (`alloc_size_max`, `alloc_size_total`, `alloc_sites`, `alloc_unknown_sites`); the training pipeline then adds 10 engineered density ratios (36 features per language, 40 for the unified model).
   3. Pre-compiled XGBoost inference function (`score(features)`) outputs a probability score $P(\text{Heavy})$.
   4. If $P(\text{Heavy}) \ge \tau_{\text{lang}}$, assign `Tier::High`; otherwise, assign `Tier::Low`.
 - **Thresholds** (from `model-training/artifacts/model_comparison.csv`):
   - Python: $\tau = 0.200$
   - Java: $\tau = 0.257$
   - C++: $\tau = 0.346$
-  - C: $\tau = 0.346$
+  - C: $\tau = 0.319$ (scored by the unified model)
 - **Model Selection**: Python, Java, and C++ use their specialised models. **C is
-  also scored by the C++ specialised model** — `regenerate_models.sh` transpiles
-  only the Python, C++, Java, and unified models into `server/src/generated/`,
-  so no C weights exist in the judge binary. The C and C++ Tree-sitter grammars
-  emit near-identical node types for these features, so the C++ weights transfer
-  without the feature vector changing shape.
+  scored by the unified multi-language model** — `predict.rs` routes `Language::C`
+  through `model_unified` with `THRESHOLD_UNIFIED` (0.319). A C-specialised model
+  is trained and exported but is not routed through, so no C-specific classifier
+  is in service; C is data-limited (428 Heavy examples in the 12.7M-row CodeNet
+  scan). The unified vector adds the 4 language one-hot columns that make it 40
+  features rather than 36.
 - **Resource Limits**:
   - If Light: `memory = 256m`, `memory-swap = 256m`, `cpus = 1.0`
   - If Heavy: `memory = uncapped`, `cpus = uncapped`

@@ -25,7 +25,7 @@ flowchart TD
 
     C --> A["100 submissions<br/>43 unique problems"]:::result
     Y --> B["10 submissions<br/>only path that exercises promotion"]:::result
-    R --> D["400/400 AC, 0 promotions<br/>394 s"]:::result
+    R --> D["400/400 AC, 0 transport failures<br/>0 promotions, 394 s"]:::result
     M --> E["strategy summary and cloud<br/>projection figures"]:::result
 
     classDef step fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#172554
@@ -138,6 +138,25 @@ promoted.
 This closes the previously open item recorded in `EXPERIMENTAL_RESULTS.md`
 section 5, which noted the `TLE` and `MLE` paths had only ever been exercised
 against a build predating them. They have now been re-run and pass.
+
+---
+
+## Routing Evaluation (separate tooling)
+
+The routing figures — the misroute rates, the threshold comparison and the
+real-failure decomposition quoted in
+[`EXPERIMENTAL_RESULTS.md`](EXPERIMENTAL_RESULTS.md) §4.5 — do **not** come from
+this harness and are not stored under `benchmarks/results/`. They are produced by
+`model-training/evaluate_routing.py`, which replays the trained models through
+the deployed per-language routing rule over a problem-disjoint test split
+(**28,687 submissions / 483 problems**, held out from **125,159 train / 1,930
+problems**).
+
+Keep the two provenance chains separate when citing: the harness measures
+execution-engine behaviour (verdicts, promotion, resource use), while
+`evaluate_routing.py` measures classifier routing quality (misroute rate and
+AUC). The frontend consumes neither: `frontend/src/App.tsx` calls only `/health`
+and `/submit`.
 
 ---
 

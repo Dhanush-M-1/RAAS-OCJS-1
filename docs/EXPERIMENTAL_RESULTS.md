@@ -167,6 +167,20 @@ tens of MB. Over 10,000 submissions that is reserved RAM **20000.0 -> 2500.0 GB,
 an 87.5% reduction**. This entire claim is conditional on the 256 MiB tier
 holding.
 
+**Provenance, and an open discrepancy.** The 87.5% figure comes from the harness's
+own macro simulation
+(`benchmarks/results/real_dataset_strategy_summary_tier256.csv`), in which Reactive
+records **zero** live promotions — so it reserves exactly $10{,}000 \times 256$ MiB
+$= 2{,}500$ GB. The project paper reports the *same nominal experiment* — 10,000
+submissions at the 256 MiB tier — as **10,557.00 GB reserved, a 47.22% reduction**,
+at a **20.3%** promotion rate. Both cannot describe the same workload: charging
+20.3% of submissions the 2048 MiB ceiling is incompatible with a 2,500 GB total.
+The two runs sample different workload mixes and model promotion differently. This
+document reports the harness CSV because that is the reproducible in-repo artifact;
+`CONFERENCE_EVALUATION_REPORT.md` reports the paper's figures because the paper is
+the authoritative written record. **Reconciling the two is an open item — do not
+cite both as if they measured the same thing.**
+
 ### 4.3 Promotion is memory-pressure-only, and routing is what matters for JVM languages
 
 Promotion lifts memory and CPU limits, but it is triggered by memory pressure
@@ -188,6 +202,87 @@ enforcement rather than relying on either alone.
 | Cost @ USD 0.68/hr | 24.48 USD/hr | 3.40 USD/hr | 86.1% (21.08 USD/hr saved) |
 | Reserved RAM over 10,000 subs | 20000.0 GB | 2500.0 GB | 87.5% |
 
+### 4.5 Routing quality: the misroute metric
+
+The tiering claims above assume each submission reaches the tier it needs. Those
+classifier figures are **not** produced by the live harness; they come from
+[`model-training/evaluate_routing.py`](../model-training/evaluate_routing.py),
+which replays the trained models through the deployed per-language routing rule
+on a held-out, problem-disjoint split.
+
+**Why misroute rather than accuracy.** A **misroute** is a genuinely-Heavy
+program sent to the Low tier. It is the metric that matters, because plain
+accuracy is dominated by the Light majority: a model that leans Low can post a
+high accuracy while failing exactly the submissions the Low/High split exists to
+protect. (Note the vocabulary: "Light/Heavy" are the *labels*; the tiers in code
+are `Low`/`High`, `server/src/policy.rs`.)
+
+**Data eras.** The original shipped models were trained on CodeContests, whose
+Light/Heavy labels are a length/difficulty heuristic (`len(code) < 650` /
+`>= 1200`), not a memory measurement; no program in that corpus exceeded 50 MiB
+measured. The new models use CodeNet with **measured** memory labels — Light
+< 25 MiB, Heavy >= 100 MiB, with the ambiguous 25-100 MiB band dropped rather
+than guessed — over 164,686 submissions and 2,520 unique problems. Across
+languages, source length explains only 7-18% of the variance of measured memory,
+which is why the label change was necessary.
+
+**Headline.** All three rows use the same decision rule — the thresholds
+currently shipped in `server/src/predict.rs` (`THRESHOLD_UNIFIED` 0.319,
+`THRESHOLD_CPP` 0.346, `THRESHOLD_JAVA` 0.257, `THRESHOLD_PYTHON` 0.200) — and
+the same problem-disjoint test split (28,687 submissions over 483 problems, held
+out from 125,159 train / 1,930 problems; 80/20 problem-grouped split, seed 42).
+Only the model changes.
+
+| model set | features | C | C++ | Java | Python | all | routed High |
+|---|---|---|---|---|---|---|---|
+| original shipped | 32 | 17.9% | 9.8% | 15.5% | 33.5% | **23.7%** | 52.6% |
+| CodeNet labels only | 32 | 46.4% | 4.7% | 8.1% | 6.3% | **6.4%** | 59.4% |
+| + allocation features | 36 | 25.0% | 4.8% | 7.5% | 6.3% | **6.3%** | 59.1% |
+
+**Attribution.** The **label fix did almost all of the work**. The four added
+allocation features are near-neutral overall (6.4% -> 6.3%), but they cut C's
+misroute from 46.4% to 25.0%, because C routes through the unified model, which
+received them.
+
+**Accuracy-optimal thresholds are the wrong objective.** The trainer selects
+thresholds by maximising accuracy, which the Light majority dominates; applied to
+the new models that choice makes routing *less* safe:
+
+| threshold set | all misroute | routed High |
+|---|---|---|
+| deployed (tuned for the old models) | 6.3% | 59.1% |
+| each model's own CV-optimal | 13.4% | 51.0% |
+| misroute-minimising | 2.2% | 70.4% |
+
+The misroute-minimising row is **degenerate** — it pins every threshold to the
+0.05 grid floor, i.e. "route almost everything High" — which shows misroute alone
+is not a usable objective; it has to be balanced against over-provisioning. The
+deployed thresholds are the safer operating point, so the new models ship with
+the **existing** thresholds.
+
+**How much of a misroute is a real failure?** Heavy means ">= 100 MiB", but the
+Low tier's hard limit is 256 MiB, so a program measured between those two numbers
+is labelled Heavy yet completes inside Low anyway. Of the **945** misrouted
+programs in the test split (memory 100.0-955.9 MiB, median 142.4):
+
+- **834 (88.3%) would have fit inside the 256 MiB Low tier**
+- **111 (11.7%) would have exceeded it**
+
+By band: 100-150 MiB 621; 150-200 MiB 127; 200-256 MiB 86; 256-512 MiB 71;
+512-1024 MiB 40. So the raw **6.3% decomposes into 0.7% genuine over-limit
+failures and 5.5% boundary artefacts**. **Caveat:** CodeNet's `memory` was
+measured on IBM/Aizu hardware, not on this project's cgroup judge, so absolute
+MiB does not map one-to-one; the honest range is **0.7%-6.3% real failures**,
+with 0.7% the optimistic end.
+
+Two verified mechanisms reduce the real-world impact further. The promotion
+watermark is `HIGH_WATERMARK_PCT = 70` of the Low limit = **179.2 MiB**
+(`server/src/docker.rs`), so most non-Java misroutes between 150 and 256 MiB
+cross the watermark and are promoted before they OOM. **Java cannot be rescued
+this way**: `-Xmx` is fixed at JVM launch, so for Java a misroute is fatal
+regardless of promotion, and Java's figure (7.5%) should **not** be discounted
+the way the aggregate can be.
+
 ## 5. Threats to Validity
 
 **Single run per cell.** Each of the 400 cells is one execution. We report no
@@ -202,11 +297,24 @@ improvement on earlier drafts of this document — but they are 100% `CODEFORCES
 live runs promoted**: the corpus cannot exercise the adaptive mechanism at all.
 Any promotion claim must come from the synthetic set, not from this matrix.
 
-**Model accuracy figures are not reproduced here.** Any model-accuracy number
-remains `UNVERIFIED - superseded by retrain in progress`: a retrain with
-additional allocation features is in progress, so all accuracy figures are
-provisional. This matrix measures what the deployed thresholds do on unseen real
-submissions; it does not re-validate the classifier.
+**Model accuracy figures are no longer provisional.** Earlier drafts marked them
+`UNVERIFIED - superseded by retrain in progress`. That retrain is complete: the
+new models use CodeNet measured-memory labels with the 36 per-language / 40
+unified feature vectors, and their test metrics and routing behaviour are
+reported in Section 4.5. The v2 per-model metrics are: Unified CV 89.56% / test
+87.38% / F1 88.48% / AUC 0.9503; C++ 96.07% / 94.39% / 96.26% / 0.9904; Java
+86.73% / 84.19% / 83.30% / 0.9172; Python 85.02% / 83.71% / 86.51% / 0.9221; C
+97.76% / 96.64% / 41.12% / 0.9387. C is **data-limited** — only 428 Heavy
+examples in the 12.7M-row CodeNet scan, median C memory 0.6 MiB — and its low F1
+follows from that. A specialised C model is trained and exported, but
+`predict.rs` routes C through the **unified** model, so no C-specific classifier
+is in service. This matrix measures what the deployed thresholds do on unseen
+real submissions; it does not re-validate the classifier.
+
+**The frontend does not consume these figures.** `frontend/src/App.tsx` calls
+only `/health` and `/submit`; it does not read the benchmark CSVs, so the UI
+cannot be used to corroborate any number in this document. The traceable source
+is the `benchmarks/results/*_tier256.csv` files.
 
 **No concurrency testing.** All 400 live runs were submitted serially. This
 matrix says nothing about behaviour under simultaneous load; the queue-latency,

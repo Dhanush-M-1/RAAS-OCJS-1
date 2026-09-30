@@ -42,7 +42,7 @@ RAAS-OCJS provides four switchable scheduling engines:
 | Strategy | When Evaluated | Mechanism | Isolation Profile |
 |---|---|---|---|
 | **Baseline** | Intake | Current standard practice | Always assigns Heavy tier (Uncapped Host Memory & CPU) |
-| **Predictive** | Pre-Execution | Tree-sitter AST $\rightarrow$ 32 features $\rightarrow$ Compiled XGBoost | Assigns Light (256 MiB, 1 CPU) or Heavy tier before launching container |
+| **Predictive** | Pre-Execution | Tree-sitter AST $\rightarrow$ 36 features (40 unified) $\rightarrow$ Compiled XGBoost | Assigns Light (256 MiB, 1 CPU) or Heavy tier before launching container |
 | **Reactive** | Mid-Execution | Linux cgroup v2 event-driven monitoring | Starts in Light tier (256 MiB); promotes to Uncapped (memory *and* CPU caps lifted) once the `memory.events` `high` counter crosses the 70% (~179.2 MiB) watermark. The trigger is memory pressure only - a purely CPU-bound submission is never promoted |
 | **Hybrid** | Both | Predictive start + Reactive live safety net | Starts in ML-predicted tier; actively promotes if memory spikes exceed prediction |
 
@@ -53,7 +53,7 @@ RAAS-OCJS provides four switchable scheduling engines:
 flowchart TD
     A["Incoming Submission"]
     B["Tree-sitter AST Parser<br/>(C++, Python, Java, C)"]
-    C["Feature Extraction<br/>(22 Base AST + 10 Engineered Ratios)"]
+    C["Feature Extraction<br/>(26 Base AST + 10 Engineered Ratios)"]
     D["Rust-Compiled XGBoost Inference<br/>(Zero Python Runtime Dependency)"]
 
     A --> B --> C --> D
@@ -193,7 +193,7 @@ Full per-language matrix, promotion traces, and threats to validity: [`docs/EXPE
 - **AST Parsing**: Tree-sitter Rust bindings (C, C++, Java, Python).
 - **ML Inference**: XGBoost transpiled to pure Rust via `m2cgen` (zero Python dependency at runtime).
 - **Frontend Visualizer**: React 19, TypeScript, Vite, Tailwind CSS, Recharts.
-- **Training Data**: IBM Project CodeNet (13.9M submissions) *or* DeepMind CodeContests (streamed directly from HuggingFace — no external drive required).
+- **Training Data**: IBM Project CodeNet (`iNeil77/CodeNet` on HuggingFace; 12.7M rows scanned, from which the 164,686-submission measured-memory corpus is drawn) *or* DeepMind CodeContests (streamed directly from HuggingFace — the earlier, length-heuristic-labelled era).
 
 ---
 
@@ -207,13 +207,13 @@ Detailed architectural and technical documentation is available in the [`docs/`]
 - [**Experimental Results** (`docs/EXPERIMENTAL_RESULTS.md`)](docs/EXPERIMENTAL_RESULTS.md): Empirical data, stability measurements, and memory savings analysis.
 - [**Setup & Developer Guide** (`docs/SETUP_GUIDE.md`)](docs/SETUP_GUIDE.md): Complete setup instructions for the judge server, the frontend, the model pipeline, and the benchmark harness.
 - [**Model Training Pipeline** (`model-training/README.md`)](model-training/README.md): Dataset extraction (CodeNet **or** CodeContests) → Rust AST feature extraction → XGBoost training → `m2cgen` transpilation into the judge binary.
-- [**Feature Extraction Pipeline** (`feature-extraction-pipeline/README.md`)](feature-extraction-pipeline/README.md): The 22 core AST features emitted by the Rust Tree-sitter extractor, plus the 10 engineered ratios added during training (32 features per language; 36 unified).
+- [**Feature Extraction Pipeline** (`feature-extraction-pipeline/README.md`)](feature-extraction-pipeline/README.md): The 26 core AST features emitted by the Rust Tree-sitter extractor, plus the 10 engineered ratios added during training (36 features per language; 40 unified).
 
 ---
 
 ## 09. Quick Start
 
-The predictive models are **already compiled into the judge** ([`server/src/generated/`](server/src/generated/)), so steps 1–3 are the only ones required to *run* the system. Step 0 is only needed if you want to retrain on a different dataset (e.g. CodeContests).
+The predictive models are **already compiled into the judge** ([`server/src/generated/`](server/src/generated/)), regenerated at 36 features (per-language) and 40 (unified) from the CodeNet measured-memory corpus, so steps 1–3 are the only ones required to *run* the system. Step 0 is only needed if you want to retrain on a different dataset (e.g. the earlier CodeContests corpus).
 
 ### 0. (Optional) Retrain the models on CodeContests
 ```bash
@@ -233,6 +233,7 @@ python3 train_advanced_xgboost.py --features-csv ./features_codecontests.csv \
 
 ./regenerate_models.sh        # artifacts/*.joblib -> server/src/generated/*.rs
 ```
+> `regenerate_models.sh` checks each trained model's own `num_features()` and refuses to write on a mismatch, so a stale 32-feature artifact set fails with an error rather than silently overwriting the generated Rust.
 Then **sync the new decision thresholds** from `artifacts/model_comparison.csv` into [`server/src/predict.rs`](server/src/predict.rs:22) before building the server. Full details: [`model-training/README.md`](model-training/README.md).
 
 > ⚠️ `extract_codecontests.py` runs `rm -rf` on `--output-dir` and `--manifest` before writing — do not point it at data you need.
