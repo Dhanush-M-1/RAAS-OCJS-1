@@ -99,6 +99,10 @@ MANIFEST_PATH = DATASET_DIR / "manifest.json"
 # The judge binds 0.0.0.0:3000 with no auth. It is normally reached over the
 # LAN from the machine that drives the benchmark; override for a local daemon.
 JUDGE_URL = os.environ.get("JUDGE_URL", "http://192.168.0.111:3000")
+# Shared secret for a judge that enforces auth. Empty means send no header, which
+# is correct for a local judge with RAAS_AUTH_TOKEN unset. A deployed judge
+# requires this; without it every submission returns 401.
+AUTH_TOKEN = os.environ.get("RAAS_AUTH_TOKEN", "")
 
 # MUST match server/src/docker.rs LOW_TIER_MB (default 256) and
 # HIGH_WATERMARK_PCT (70), or every derived figure is fiction.
@@ -217,10 +221,19 @@ def submit(payload: dict, timeout: float = 180.0) -> dict | None:
     """POST one submission. Returns the parsed result, or None on transport error."""
     if requests is None:
         raise RuntimeError("the `requests` package is required (pip install requests)")
+    headers = {"x-raas-token": AUTH_TOKEN} if AUTH_TOKEN else {}
     try:
-        r = requests.post(f"{judge_url()}/submit", json=payload, timeout=timeout)
+        r = requests.post(
+            f"{judge_url()}/submit", json=payload, headers=headers, timeout=timeout
+        )
     except Exception as e:
         log(f"    [ERROR] submit failed: {e}")
+        return None
+    if r.status_code == 401:
+        log(
+            "    [ERROR] HTTP 401: the judge requires a shared secret. Export "
+            "RAAS_AUTH_TOKEN to match /etc/raas/judge.env on the host."
+        )
         return None
     if r.status_code != 200:
         log(f"    [ERROR] HTTP {r.status_code}: {r.text[:200]}")
