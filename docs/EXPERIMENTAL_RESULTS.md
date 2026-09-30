@@ -283,7 +283,162 @@ this way**: `-Xmx` is fixed at JVM launch, so for Java a misroute is fatal
 regardless of promotion, and Java's figure (7.5%) should **not** be discounted
 the way the aggregate can be.
 
-## 5. Threats to Validity
+## 5. Known Limitations & Error Analysis
+
+The Predictive stage is a *static* classifier: it inspects source structure and
+never observes runtime behaviour. Its mistakes are therefore structural, not
+defects, and they fall into two symmetric directions that share one root cause.
+We document them together because each direction alone looks like a bug, whereas
+together they define the operating envelope of the design and explain why the
+reactive path is load-bearing rather than optional. Neither direction produces a
+wrong verdict under an adaptive policy; both distort resource reservations.
+
+### 5.1 Root cause: static features over proxy labels
+
+`predict_tier()` scores a *proxy* for resource usage, not resource usage itself.
+Two properties of the feature extractor make that proxy imperfect:
+
+1. **Allocation size is tracked only when it is a compile-time constant.**
+   `large_alloc_flag` is set by `detect_large_alloc_*()` only when the size
+   argument folds to a literal via `const_eval()`. An allocation whose size is a
+   runtime variable — `bytearray(size_bytes)`, `malloc(n * 4)`, `new int[n]` —
+   evaluates to `None` and is *never flagged*. This is a stated limitation of
+   `const_eval()` ("allocations sized by a variable are undetectable statically
+   and are never flagged").
+2. **"Heavy" is inferred from idiom keywords.** `has_heavy_datastructure` matches
+   tokens (`defaultdict`, `heapq`, `unordered_map`, `PriorityQueue`, …) that
+   correlate with hard problems in the label distribution, not with bytes
+   allocated. Small but idiomatic code is therefore pushed toward Heavy.
+
+The labels compound this. The CodeContests extractor assigns tier from problem
+`difficulty` and **source length** (`len(code) < 650` ⇒ Light; `len(code) >= 1200`
+⇒ Heavy) — never from measured memory. The CodeNet path labels from measured
+`memory`/`cpu_time` (≥ 64 MiB or ≥ 2 s ⇒ Heavy). A model trained on the former
+inherits "short ⇒ Light" and "idiomatic ⇒ Heavy" as priors.
+
+### 5.2 The two error directions
+
+| | **Actual Heavy** | **Actual Light** |
+| :--- | :--- | :--- |
+| **Predicted Heavy** | correct (start uncapped) | **False positive** — Case B / P5: an unnecessary uncapped reservation; the cost is *opportunity*, not correctness |
+| **Predicted Light** | **False negative** — Case A / P2: an OOM risk under Predictive; rescued by Reactive/Hybrid | correct (start in the 256 MiB tier) |
+
+### 5.3 Case A — false negative: input-dependent allocation
+
+A correct Python solution allocates a buffer whose size is read from stdin:
+
+```python
+import sys
+mib = int(sys.stdin.read().strip())
+size_bytes = mib * 1024 * 1024
+buf = bytearray(size_bytes)
+for i in range(0, size_bytes, 4096):
+    buf[i] = 1
+print(len(buf))
+```
+
+Static extraction of this file yields `large_alloc_flag = false`. Because the
+argument to `bytearray(...)` is the identifier `size_bytes`, `const_eval()`
+returns `None`, `above_threshold(None)` is `false`, and the flag never fires. The
+vector is `true` only for `has_fast_io`; with a 92-node AST, 9 source lines and
+299 source characters, the classifier routes it to **Light**. Its true footprint
+is however large — it scales with the stdin value (e.g. ≈600 MiB for `600`).
+Under Predictive this is an OOM/MLE risk; under Hybrid/Reactive the 179.2 MiB
+watermark promotes it before the kill.
+
+This is a distinct and more fundamental failure than §4.3 (which concerns
+*literal* 200- vs 230-MiB matrices that are structurally near-identical): here
+the size is not a literal at all, so no threshold on the extracted features can
+recover it.
+
+### 5.4 Case B — false positive: idiomatic but small
+
+A correct Python solution uses a hash map and a heap to find the most frequent
+element:
+
+```python
+import sys
+from collections import defaultdict
+import heapq
+
+lines = sys.stdin.read().split()
+if lines:
+    n = int(lines[0])
+    nums = [int(x) for x in lines[1:n+1]]
+
+    freq = defaultdict(int)
+    for x in nums:
+        freq[x] += 1
+
+    heap = []
+    for val, count in freq.items():
+        heapq.heappush(heap, (-count, val))
+
+    top_count, top_val = heapq.heappop(heap)
+    print(f"{top_val} {-top_count}")
+```
+
+Both `defaultdict` and `heapq` match `has_heavy_datastructure`, and `stdin.read`
+matches `has_fast_io`, so the classifier routes it to **Heavy**. The actual
+working set is ≈10 MB. A four-strategy run (calibration host) gives:
+
+| Strategy | Verdict | Tier started | Memory allocated | Peak used | Utilization | Promotion |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Baseline | AC | Heavy | Uncapped (Host) | 9.13 MB | — | None |
+| Predictive | AC | Heavy | Uncapped (Host) | 10.30 MB | — | None |
+| Reactive | AC | Light | 256.00 MB | 12.94 MB | 5.1% | None |
+| Hybrid | AC | Heavy | Uncapped (Host) | 10.43 MB | — | None |
+
+Every verdict is correct, so this is not a correctness failure. The cost is
+efficiency: Predictive and Hybrid reserve an uncapped slot for a submission that
+fits in 5% of the Light tier, while Reactive — which starts everything Light —
+obtains the strictly better outcome here at no cost. This is the same phenomenon
+as §4.4 (P5 over-provisioning), triggered by the same construct class.
+
+### 5.5 Why this is a limitation to document, not a defect to fix
+
+- **It is not repairable in general.** Runtime memory depends on the input, so for
+  an arbitrary submission it is not statically decidable. Keyword special-casing
+  (`add bytearray to the heavy list`) trades one error for the other and does not
+  generalise.
+- **The adaptive layer bounds both directions.** A false negative is absorbed by
+  live promotion (§2); a false positive only wastes reserved capacity. No row in
+  the measured matrix returned a wrong verdict because of a misclassification.
+- **The honest claim is the trade-off, not perfect prediction.** The value of the
+  Predictive stage is reduced reservation *with* a recovered safety net
+  (quantified in §4.2); its cost is exactly the two error directions above.
+
+### 5.6 A design consequence: the optimal threshold is policy-dependent
+
+Because the two errors cost differently under different policies, the *same*
+`heavy_prob` should not share one threshold across policies:
+
+| Policy | False negative (Heavy→Light) | False positive (Light→Heavy) | Rational bias |
+| :--- | :--- | :--- | :--- |
+| Baseline | n/a (always Heavy) | n/a | — |
+| Predictive | **fatal** (MLE — no promotion) | wasted capacity | bias Heavy (lower τ) |
+| Reactive | recovered by promotion | n/a (always Light) | — |
+| Hybrid | recovered by promotion | wasted capacity | bias Light (higher τ) |
+
+The deployed per-language thresholds (τ_Python = 0.200 … τ_C++ = 0.346) are a
+single compromise serving both policies. A production system could carry two
+thresholds per language: an aggressive one for Predictive-only deployments and a
+conservative one for Hybrid, where a missed Heavy is recoverable and
+over-provisioning is pure waste.
+
+### 5.7 Recommended treatment
+
+1. Keep the predictor and its thresholds as-is; state this limitation explicitly.
+2. Report **precision and recall separately** (with the 2×2 counts above) rather
+   than a single accuracy figure — Cases A and B are one instance of each error.
+3. Where labels can be measured (the CodeNet regime), prefer measured
+   `memory`/`cpu_time` over difficulty/length proxies. A regression on log-memory
+   would resolve both directions structurally, mapping "≈10 MB ⇒ Light" and
+   "≈600 MB ⇒ Heavy" without a fixed decision boundary.
+
+---
+
+## 6. Threats to Validity
 
 **Single run per cell.** Each of the 400 cells is one execution. We report no
 confidence intervals, and small differences between neighbouring cells should
