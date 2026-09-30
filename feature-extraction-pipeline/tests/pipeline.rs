@@ -165,14 +165,13 @@ fn pipeline_end_to_end_matches_hand_computed_values() {
     assert_eq!(s007[0].label, "Heavy");
 
     // CSV serialization round-trips to the expected header + row count.
+    // The header is asserted against the exported constant rather than a second
+    // literal, so adding a feature column cannot leave this test stale.
     let csv_path = tmp.path().join("out.csv");
     output::write_csv(&csv_path, &rows).unwrap();
     let text = std::fs::read_to_string(&csv_path).unwrap();
     let mut lines = text.lines();
-    assert_eq!(
-        lines.next().unwrap(),
-        "submission_id,language,nesting_depth,max_loop_depth,total_loops,cyclomatic_complexity,is_recursive,recursive_call_count,large_alloc_flag,has_fast_io,has_heavy_datastructure,has_modulo_arithmetic,has_bitmask_ops,has_graph_adjacency,total_functions,total_calls,total_subscripts,total_2d_subscripts,total_arithmetic_ops,max_integer_constant,ast_node_count,ast_depth,source_loc,source_chars,parse_error_flag,label"
-    );
+    assert_eq!(lines.next().unwrap(), output::CSV_HEADER);
     let data_lines = lines.filter(|l| !l.is_empty()).count();
     assert_eq!(data_lines, 7);
 }

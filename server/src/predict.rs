@@ -2,7 +2,10 @@
 //!
 //! The model weights are compiled into Rust by m2cgen (see `src/generated/`).
 //! Feature order must match `get_feature_cols()` in `model-training/train_advanced_xgboost.py`:
-//!   22 base AST features, then 10 engineered features, then (unified only) 4 language one-hots.
+//!   26 base AST features, then 10 engineered features, then (unified only) 4 language one-hots.
+//! The counts are also hardcoded in `model-training/regenerate_models.sh`; a
+//! mismatch between the four sites produces silently wrong scores rather than an
+//! error, which is what `feature_vector_len_is_pinned` below guards against.
 
 use crate::policy::Tier;
 use feature_extraction::features::{compute_features, Features};
@@ -46,8 +49,8 @@ fn u64(x: u64) -> f64 {
     x as f64
 }
 
-/// Build the 32-feature vector for the specialized (per-language) models.
-/// Order: 22 base AST + 10 engineered. Matches `get_feature_cols(include_language=False)`.
+/// Build the 36-feature vector for the specialized (per-language) models.
+/// Order: 26 base AST + 10 engineered. Matches `get_feature_cols(include_language=False)`.
 fn specialized_features(f: &Features) -> Vec<f64> {
     let max_nodes = f.ast_node_count.max(1) as f64;
     let max_loc = f.source_loc.max(1) as f64;
@@ -62,21 +65,25 @@ fn specialized_features(f: &Features) -> Vec<f64> {
         b(f.is_recursive),                  // 5 is_recursive
         u32(f.recursive_call_count),        // 6 recursive_call_count
         b(f.large_alloc_flag),              // 7 large_alloc_flag
-        b(f.has_fast_io),                   // 8 has_fast_io
-        b(f.has_heavy_datastructure),       // 9 has_heavy_datastructure
-        b(f.has_modulo_arithmetic),         // 10 has_modulo_arithmetic
-        b(f.has_bitmask_ops),               // 11 has_bitmask_ops
-        b(f.has_graph_adjacency),           // 12 has_graph_adjacency
-        u32(f.total_functions),             // 13 total_functions
-        u32(f.total_calls),                 // 14 total_calls
-        u32(f.total_subscripts),            // 15 total_subscripts
-        u32(f.total_2d_subscripts),         // 16 total_2d_subscripts
-        u32(f.total_arithmetic_ops),        // 17 total_arithmetic_ops
-        u64(f.max_integer_constant),        // 18 max_integer_constant
-        u32(f.ast_node_count),              // 19 ast_node_count
-        u32(f.ast_depth),                   // 20 ast_depth
-        u32(f.source_loc),                  // 21 source_loc
-        u32(f.source_chars),                // 22 source_chars
+        u64(f.alloc_size_max),              // 8 alloc_size_max
+        u64(f.alloc_size_total),            // 9 alloc_size_total
+        u32(f.alloc_sites),                 // 10 alloc_sites
+        u32(f.alloc_unknown_sites),         // 11 alloc_unknown_sites
+        b(f.has_fast_io),                   // 12 has_fast_io
+        b(f.has_heavy_datastructure),       // 13 has_heavy_datastructure
+        b(f.has_modulo_arithmetic),         // 14 has_modulo_arithmetic
+        b(f.has_bitmask_ops),               // 15 has_bitmask_ops
+        b(f.has_graph_adjacency),           // 16 has_graph_adjacency
+        u32(f.total_functions),             // 17 total_functions
+        u32(f.total_calls),                 // 18 total_calls
+        u32(f.total_subscripts),            // 19 total_subscripts
+        u32(f.total_2d_subscripts),         // 20 total_2d_subscripts
+        u32(f.total_arithmetic_ops),        // 21 total_arithmetic_ops
+        u64(f.max_integer_constant),        // 22 max_integer_constant
+        u32(f.ast_node_count),              // 23 ast_node_count
+        u32(f.ast_depth),                   // 24 ast_depth
+        u32(f.source_loc),                  // 25 source_loc
+        u32(f.source_chars),                // 26 source_chars
         // 10 engineered
         u32(f.total_loops) / max_nodes,             // loop_density
         u32(f.total_calls) / max_nodes,             // call_density
@@ -91,8 +98,8 @@ fn specialized_features(f: &Features) -> Vec<f64> {
     ]
 }
 
-/// Build the 36-feature vector for the unified multi-language model.
-/// Order: 32 features + 4 language one-hots (lang_C, lang_C++, lang_Java, lang_Python).
+/// Build the 40-feature vector for the unified multi-language model.
+/// Order: 36 features + 4 language one-hots (lang_C, lang_C++, lang_Java, lang_Python).
 fn unified_features(f: &Features, lang: Language) -> Vec<f64> {
     let mut v = specialized_features(f);
     let (c, cpp, java, python) = match lang {
@@ -126,5 +133,47 @@ pub fn predict_tier(source: &str, language: &str) -> Tier {
         Tier::High
     } else {
         Tier::Low
+    }
+}
+
+#[cfg(test)]
+mod feature_vector_tests {
+    use super::*;
+
+    /// The feature count lives in four places that cannot see each other: this file,
+    /// `train_advanced_xgboost.py` (`get_feature_cols`), `regenerate_models.sh`, and the
+    /// m2cgen output under `src/generated/`. A mismatch is not reliably caught at runtime:
+    /// the generated `score` functions index the vector positionally, so a wrong-length
+    /// vector yields silently wrong scores (or a panic mid-inference) rather than an error.
+    /// Pinning the lengths here makes any single-site change fail loudly.
+    #[test]
+    fn feature_vector_len_is_pinned() {
+        let f = compute_features("int main() { return 0; }", Language::C);
+
+        assert_eq!(
+            specialized_features(&f).len(),
+            36,
+            "specialized vector = 26 base AST + 10 engineered"
+        );
+        assert_eq!(
+            unified_features(&f, Language::C).len(),
+            40,
+            "unified vector = specialized 36 + 4 language one-hots"
+        );
+    }
+
+    /// The one-hots are positional, so the order must match `get_feature_cols`. A
+    /// reordering here would leave every length assertion above still passing.
+    #[test]
+    fn language_one_hots_are_positioned_correctly() {
+        let f = compute_features("int main() { return 0; }", Language::C);
+        let unified = unified_features(&f, Language::C);
+        assert_eq!(&unified[36..], &[1.0, 0.0, 0.0, 0.0], "C one-hot");
+
+        let java = unified_features(&f, Language::Java);
+        assert_eq!(&java[36..], &[0.0, 0.0, 1.0, 0.0], "Java one-hot");
+
+        // Specialized vectors must NOT carry the one-hots.
+        assert_eq!(specialized_features(&f).len(), 36);
     }
 }

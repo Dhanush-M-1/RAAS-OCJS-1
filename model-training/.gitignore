@@ -17,6 +17,17 @@ features_*
 sample_manifest*.csv
 features.csv
 
+# CodeNet manifest is derived from codenet_subset/ (itself ignored); the extractor
+# rebuilds it with --manifest-only, so there is no reason to carry a 19 MB blob.
+codenet_manifest.csv
+
+# Downloaded CodeNet parquet shards (~4.8 GB for Python/Java/C/C++)
+codenet/
+
+# Measured peak-memory results and per-phase training outputs
+measured_memory.csv
+artifacts_*/
+
 # Binary trained models & Treelite checkpoints (~10 MB)
 artifacts/
 *.checkpoint

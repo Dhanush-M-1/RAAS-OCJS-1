@@ -38,6 +38,16 @@ pub struct Features {
     pub recursive_call_count: u32,
     /// `true` if a static allocation or global array has size above [`LARGE_ALLOC_THRESHOLD`].
     pub large_alloc_flag: bool,
+    /// Largest statically-known allocation. Unit is bytes for the C allocator
+    /// family and element counts for `new T[n]` / `[0] * n` (see [`AllocStats`]).
+    pub alloc_size_max: u64,
+    /// Sum of every statically-known allocation. Same unit caveat as `alloc_size_max`.
+    pub alloc_size_total: u64,
+    /// Count of recognised allocation sites (static or not).
+    pub alloc_sites: u32,
+    /// Recognised allocation sites whose size is NOT statically known — i.e.
+    /// input-driven allocations like `malloc(n)` or `new byte[chunks][1 << 20]`.
+    pub alloc_unknown_sites: u32,
     /// `true` if Fast I/O / bulk stream reading idioms are detected in source.
     pub has_fast_io: bool,
     /// `true` if heavy standard library structures (hash maps, trees, queues) are detected.
@@ -92,7 +102,8 @@ pub fn compute_features(source: &str, lang: Language) -> Features {
     let (max_loop_depth, total_loops) = compute_loop_metrics(root, lang);
     let cyclomatic_complexity = 1 + count_decision_points(root, source);
     let (is_recursive, recursive_call_count) = detect_recursion_with_count(root, lang, source);
-    let large_alloc_flag = detect_large_allocation(root, lang, source);
+    let alloc = detect_large_allocation(root, lang, source);
+    let large_alloc_flag = alloc.any_large();
     let has_fast_io = detect_fast_io(source, lang);
     let has_heavy_datastructure = detect_heavy_datastructure(source, lang);
     let has_modulo_arithmetic = detect_modulo_arithmetic(source);
@@ -123,6 +134,10 @@ pub fn compute_features(source: &str, lang: Language) -> Features {
         is_recursive,
         recursive_call_count,
         large_alloc_flag,
+        alloc_size_max: alloc.size_max,
+        alloc_size_total: alloc.size_total,
+        alloc_sites: alloc.sites,
+        alloc_unknown_sites: alloc.unknown_sites,
         has_fast_io,
         has_heavy_datastructure,
         has_modulo_arithmetic,
@@ -685,18 +700,73 @@ fn detect_recursion_python(root: Node, source: &str) -> u32 {
 // large_alloc_flag
 // ---------------------------------------------------------------------------
 
-fn detect_large_allocation(root: Node, lang: Language, source: &str) -> bool {
-    match lang {
-        Language::C => detect_large_alloc_c(root, source),
-        Language::Cpp => detect_large_alloc_cpp(root, source),
-        Language::Java => detect_large_alloc_java(root, source),
-        Language::Python => detect_large_alloc_python(root, source),
+/// Aggregated allocation statistics for one source file.
+///
+/// `large_alloc_flag` is a single boolean against one fixed threshold, and a
+/// boolean cannot express *how big* an allocation is. Measured feature
+/// importance showed the models ignore it almost entirely — it is literally
+/// unused (importance 0.0000) by the specialised C++ model. These aggregates
+/// carry the magnitude instead:
+///
+/// - `size_max`      largest statically-known allocation
+/// - `size_total`    sum of every statically-known allocation
+/// - `sites`         count of recognised allocation sites (static or not)
+/// - `unknown_sites` recognised sites whose size is NOT statically known
+///
+/// Unit caveat, inherited from the existing detectors and deliberate: a size is
+/// in BYTES for the C allocator family (`malloc(n)` is bytes) but in ELEMENT
+/// COUNTS for C++ `new T[n]`, Java `new int[n]` and Python `[0] * n`, which
+/// cannot be converted without resolving the element type. The fields are
+/// therefore named `size_*` rather than `bytes_*` to avoid claiming a unit the
+/// extractor does not actually produce.
+///
+/// `unknown_sites` is the load-bearing one. `new byte[chunks][1 << 20]` and
+/// `malloc(n)` have no static size, yet an input-driven allocation is exactly
+/// the shape that blows a memory budget — and it is invisible to
+/// `large_alloc_flag` by construction.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AllocStats {
+    pub size_max: u64,
+    pub size_total: u64,
+    pub sites: u32,
+    pub unknown_sites: u32,
+}
+
+impl AllocStats {
+    /// Record one recognised allocation site; `None` means "size not statically known".
+    fn record(&mut self, size: Option<u64>) {
+        self.sites = self.sites.saturating_add(1);
+        match size {
+            Some(s) => {
+                self.size_max = self.size_max.max(s);
+                self.size_total = self.size_total.saturating_add(s);
+            }
+            None => self.unknown_sites = self.unknown_sites.saturating_add(1),
+        }
+    }
+
+    /// The historical boolean: any static allocation above [`LARGE_ALLOC_THRESHOLD`].
+    fn any_large(&self) -> bool {
+        self.size_max > LARGE_ALLOC_THRESHOLD
     }
 }
 
-/// Is the statically-known size (if any) above the threshold?
-fn above_threshold(size: Option<u64>) -> bool {
-    size.map(|s| s > LARGE_ALLOC_THRESHOLD).unwrap_or(false)
+fn detect_large_allocation(root: Node, lang: Language, source: &str) -> AllocStats {
+    match lang {
+        Language::C => alloc_stats_c(root, source),
+        Language::Cpp => alloc_stats_cpp(root, source),
+        Language::Java => alloc_stats_java(root, source),
+        Language::Python => alloc_stats_python(root, source),
+    }
+}
+
+/// Is this C function name one of the allocators we recognise?
+///
+/// This matters for `sites`/`unknown_sites`: without it every ordinary call
+/// (`printf`, `scanf`, ...) would be counted as an allocation site with an
+/// unknown size, which would make the feature meaningless noise.
+fn is_c_allocator(name: &str) -> bool {
+    matches!(name, "malloc" | "calloc" | "realloc" | "aligned_alloc")
 }
 
 /// Read the `index`-th argument of an `argument_list` and evaluate it as a
@@ -707,13 +777,10 @@ fn arg_const(args: Node, index: usize, bytes: &[u8]) -> Option<u64> {
     const_eval(arg, bytes)
 }
 
-fn detect_large_alloc_c(root: Node, source: &str) -> bool {
+fn alloc_stats_c(root: Node, source: &str) -> AllocStats {
     let bytes = source.as_bytes();
-    let mut flagged = false;
+    let mut stats = AllocStats::default();
     for_each_node(root, |n| {
-        if flagged {
-            return;
-        }
         if n.kind() != "call_expression" {
             return;
         }
@@ -722,16 +789,18 @@ fn detect_large_alloc_c(root: Node, source: &str) -> bool {
             _ => return,
         };
         let name = callee.utf8_text(bytes).unwrap_or("");
+        if !is_c_allocator(name) {
+            return;
+        }
         let args = match n.child_by_field_name("arguments") {
             Some(a) => a,
             None => return,
         };
-        let size = c_alloc_size(name, args, bytes);
-        if above_threshold(size) {
-            flagged = true;
-        }
+        // `None` here now means "recognised allocator, size not statically known"
+        // (e.g. `malloc(n)`), which is exactly what `unknown_sites` counts.
+        stats.record(c_alloc_size(name, args, bytes));
     });
-    flagged
+    stats
 }
 
 /// Total allocation size for a C allocator call, when fully static:
@@ -751,13 +820,10 @@ fn c_alloc_size(name: &str, args: Node, bytes: &[u8]) -> Option<u64> {
     }
 }
 
-fn detect_large_alloc_cpp(root: Node, source: &str) -> bool {
+fn alloc_stats_cpp(root: Node, source: &str) -> AllocStats {
     let bytes = source.as_bytes();
-    let mut flagged = false;
+    let mut stats = AllocStats::default();
     for_each_node(root, |n| {
-        if flagged {
-            return;
-        }
         match n.kind() {
             // v.reserve(n) / v.resize(n)
             "call_expression" => {
@@ -781,20 +847,16 @@ fn detect_large_alloc_cpp(root: Node, source: &str) -> bool {
                     Some(a) => a,
                     None => return,
                 };
-                if above_threshold(arg_const(args, 0, bytes)) {
-                    flagged = true;
-                }
+                stats.record(arg_const(args, 0, bytes));
             }
-            // new T[n]
+            // new T[n] — the size expression is the named child inside brackets
             "new_expression" => {
                 let mut cursor = n.walk();
                 for child in n.children(&mut cursor) {
                     if child.kind() == "new_declarator" {
-                        // the size expression is the named child inside brackets
                         if let Some(size_node) = child.named_child(0) {
-                            if above_threshold(const_eval(size_node, bytes)) {
-                                flagged = true;
-                            }
+                            // non-constant size (e.g. `new byte[chunks]`) -> unknown site
+                            stats.record(const_eval(size_node, bytes));
                         }
                     }
                 }
@@ -802,26 +864,23 @@ fn detect_large_alloc_cpp(root: Node, source: &str) -> bool {
             _ => {}
         }
     });
-    flagged
+    stats
 }
 
-fn detect_large_alloc_java(root: Node, source: &str) -> bool {
+fn alloc_stats_java(root: Node, source: &str) -> AllocStats {
     let bytes = source.as_bytes();
-    let mut flagged = false;
+    let mut stats = AllocStats::default();
     for_each_node(root, |n| {
-        if flagged {
-            return;
-        }
         match n.kind() {
-            // new int[10000]
+            // new int[10000], and each dimension of `new byte[chunks][1 << 20]`
             "array_creation_expression" => {
                 let mut cursor = n.walk();
                 for child in n.children(&mut cursor) {
                     if child.kind() == "dimensions_expr" {
                         if let Some(size_node) = child.named_child(0) {
-                            if above_threshold(const_eval(size_node, bytes)) {
-                                flagged = true;
-                            }
+                            // a variable outer dimension -> unknown site, which is
+                            // precisely the shape `large_alloc_flag` cannot see
+                            stats.record(const_eval(size_node, bytes));
                         }
                     }
                 }
@@ -839,14 +898,12 @@ fn detect_large_alloc_java(root: Node, source: &str) -> bool {
                     None => return,
                 };
                 // first constructor argument is the initial capacity
-                if above_threshold(arg_const(args, 0, bytes)) {
-                    flagged = true;
-                }
+                stats.record(arg_const(args, 0, bytes));
             }
             _ => {}
         }
     });
-    flagged
+    stats
 }
 
 /// The created type name inside an `object_creation_expression` (e.g. "ArrayList").
@@ -890,13 +947,10 @@ fn is_capacity_collection(name: &str) -> bool {
     )
 }
 
-fn detect_large_alloc_python(root: Node, source: &str) -> bool {
+fn alloc_stats_python(root: Node, source: &str) -> AllocStats {
     let bytes = source.as_bytes();
-    let mut flagged = false;
+    let mut stats = AllocStats::default();
     for_each_node(root, |n| {
-        if flagged {
-            return;
-        }
         match n.kind() {
             // [0] * 1000000  (container repetition with a literal count)
             "binary_operator" => {
@@ -918,9 +972,8 @@ fn detect_large_alloc_python(root: Node, source: &str) -> bool {
                     return;
                 }
                 if let Some(right) = n.child_by_field_name("right") {
-                    if above_threshold(const_eval(right, bytes)) {
-                        flagged = true;
-                    }
+                    // `[0] * n` with a variable n -> unknown site
+                    stats.record(const_eval(right, bytes));
                 }
             }
             // bytearray(2000000)
@@ -937,14 +990,12 @@ fn detect_large_alloc_python(root: Node, source: &str) -> bool {
                     Some(a) => a,
                     None => return,
                 };
-                if above_threshold(arg_const(args, 0, bytes)) {
-                    flagged = true;
-                }
+                stats.record(arg_const(args, 0, bytes));
             }
             _ => {}
         }
     });
-    flagged
+    stats
 }
 
 // ---------------------------------------------------------------------------
@@ -1049,6 +1100,72 @@ mod tests {
         );
         assert_eq!(f.nesting_depth, 3);
         assert_eq!(f.cyclomatic_complexity, 4, "for + while + if => 1 + 3");
+    }
+
+    #[test]
+    fn alloc_stats_capture_dynamic_allocation() {
+        // `malloc(n)` is the case the boolean feature structurally cannot see: the
+        // size is a runtime value, so `const_eval` fails and `large_alloc_flag`
+        // stays false even though the allocation may be enormous.
+        // `alloc_unknown_sites` is what carries that signal.
+        let f = feats(
+            r#"#include <stdlib.h>
+               int main(void) { int n; scanf("%d", &n); char *p = malloc(n); return p != 0; }"#,
+            Language::C,
+        );
+        assert!(!f.large_alloc_flag, "no statically-known large size");
+        assert_eq!(f.alloc_sites, 1, "one recognised allocation site");
+        assert_eq!(f.alloc_unknown_sites, 1, "sized by a variable");
+        assert_eq!(f.alloc_size_max, 0);
+    }
+
+    #[test]
+    fn alloc_stats_capture_magnitude_not_just_a_threshold() {
+        let f = feats(
+            r#"#include <stdlib.h>
+               int main(void) { char *a = malloc(5 * 1024 * 1024); char *b = malloc(2048); return a != 0 && b != 0; }"#,
+            Language::C,
+        );
+        assert!(f.large_alloc_flag, "5 MiB exceeds the 1_000_000 threshold");
+        assert_eq!(f.alloc_sites, 2);
+        assert_eq!(f.alloc_unknown_sites, 0);
+        assert_eq!(
+            f.alloc_size_max,
+            5 * 1024 * 1024,
+            "the boolean discards this magnitude"
+        );
+        assert_eq!(f.alloc_size_total, 5 * 1024 * 1024 + 2048);
+    }
+
+    #[test]
+    fn alloc_stats_java_multidim_counts_each_dimension() {
+        // The shape behind the misrouted heavy Java submission: a variable outer
+        // dimension times a constant inner one. The constant inner dimension is
+        // what makes the boolean fire; the variable outer dimension is visible
+        // only through `alloc_unknown_sites`.
+        let f = feats(
+            "import java.util.*; class S { void m(int chunks) { byte[][] a = new byte[chunks][1024 * 1024]; } }",
+            Language::Java,
+        );
+        assert_eq!(f.alloc_sites, 2, "two dimensions = two sites");
+        assert_eq!(f.alloc_unknown_sites, 1, "the outer dimension is a variable");
+        assert_eq!(f.alloc_size_max, 1024 * 1024);
+        assert!(f.large_alloc_flag, "inner dimension alone exceeds the threshold");
+    }
+
+    #[test]
+    fn alloc_stats_ignore_non_allocating_calls() {
+        // Guards the `is_c_allocator` filter. Without it every ordinary call would
+        // be counted as an unknown-size allocation site, and the feature would be
+        // noise dressed up as signal.
+        let f = feats(
+            r#"#include <stdio.h>
+               int main(void) { printf("hi\n"); return 0; }"#,
+            Language::C,
+        );
+        assert_eq!(f.alloc_sites, 0);
+        assert_eq!(f.alloc_unknown_sites, 0);
+        assert_eq!(f.alloc_size_total, 0);
     }
 
     #[test]

@@ -25,6 +25,10 @@ pub struct Row {
     pub is_recursive: u32,
     pub recursive_call_count: u32,
     pub large_alloc_flag: u32,
+    pub alloc_size_max: u64,
+    pub alloc_size_total: u64,
+    pub alloc_sites: u32,
+    pub alloc_unknown_sites: u32,
     pub has_fast_io: u32,
     pub has_heavy_datastructure: u32,
     pub has_modulo_arithmetic: u32,
@@ -89,6 +93,10 @@ pub fn build_rows(samples: &[Sample]) -> (Vec<Row>, Summary) {
             is_recursive: feats.is_recursive as u32,
             recursive_call_count: feats.recursive_call_count,
             large_alloc_flag: feats.large_alloc_flag as u32,
+            alloc_size_max: feats.alloc_size_max,
+            alloc_size_total: feats.alloc_size_total,
+            alloc_sites: feats.alloc_sites,
+            alloc_unknown_sites: feats.alloc_unknown_sites,
             has_fast_io: feats.has_fast_io as u32,
             has_heavy_datastructure: feats.has_heavy_datastructure as u32,
             has_modulo_arithmetic: feats.has_modulo_arithmetic as u32,
@@ -112,17 +120,24 @@ pub fn build_rows(samples: &[Sample]) -> (Vec<Row>, Summary) {
     (rows, summary)
 }
 
+/// The CSV header, exported as the single source of truth.
+///
+/// It used to be written out literally in three places (this writer plus two
+/// test files), so adding a feature column silently broke whichever copies were
+/// not updated — which is exactly what happened when the allocation columns were
+/// added. Tests now assert against this constant instead of a second literal.
+pub const CSV_HEADER: &str = "submission_id,language,nesting_depth,max_loop_depth,total_loops,cyclomatic_complexity,is_recursive,recursive_call_count,large_alloc_flag,alloc_size_max,alloc_size_total,alloc_sites,alloc_unknown_sites,has_fast_io,has_heavy_datastructure,has_modulo_arithmetic,has_bitmask_ops,has_graph_adjacency,total_functions,total_calls,total_subscripts,total_2d_subscripts,total_arithmetic_ops,max_integer_constant,ast_node_count,ast_depth,source_loc,source_chars,parse_error_flag,label";
+
 /// Write the CSV, UTF-8, header included, one row per entry.
 pub fn write_csv(path: &Path, rows: &[Row]) -> std::io::Result<()> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
-    w.write_all(
-        b"submission_id,language,nesting_depth,max_loop_depth,total_loops,cyclomatic_complexity,is_recursive,recursive_call_count,large_alloc_flag,has_fast_io,has_heavy_datastructure,has_modulo_arithmetic,has_bitmask_ops,has_graph_adjacency,total_functions,total_calls,total_subscripts,total_2d_subscripts,total_arithmetic_ops,max_integer_constant,ast_node_count,ast_depth,source_loc,source_chars,parse_error_flag,label\n",
-    )?;
+    w.write_all(CSV_HEADER.as_bytes())?;
+    w.write_all(b"\n")?;
     for r in rows {
         writeln!(
             w,
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             csv_escape(&r.submission_id),
             csv_escape(&r.language),
             r.nesting_depth,
@@ -132,6 +147,10 @@ pub fn write_csv(path: &Path, rows: &[Row]) -> std::io::Result<()> {
             r.is_recursive,
             r.recursive_call_count,
             r.large_alloc_flag,
+            r.alloc_size_max,
+            r.alloc_size_total,
+            r.alloc_sites,
+            r.alloc_unknown_sites,
             r.has_fast_io,
             r.has_heavy_datastructure,
             r.has_modulo_arithmetic,
@@ -279,6 +298,10 @@ mod tests {
             is_recursive: 1,
             recursive_call_count: 1,
             large_alloc_flag: 0,
+            alloc_size_max: 1024,
+            alloc_size_total: 4096,
+            alloc_sites: 3,
+            alloc_unknown_sites: 1,
             has_fast_io: 0,
             has_heavy_datastructure: 0,
             has_modulo_arithmetic: 0,
@@ -301,11 +324,8 @@ mod tests {
         let text = std::fs::read_to_string(&tmp).unwrap();
         let _ = std::fs::remove_file(&tmp);
         let mut lines = text.lines();
-        assert_eq!(
-            lines.next().unwrap(),
-            "submission_id,language,nesting_depth,max_loop_depth,total_loops,cyclomatic_complexity,is_recursive,recursive_call_count,large_alloc_flag,has_fast_io,has_heavy_datastructure,has_modulo_arithmetic,has_bitmask_ops,has_graph_adjacency,total_functions,total_calls,total_subscripts,total_2d_subscripts,total_arithmetic_ops,max_integer_constant,ast_node_count,ast_depth,source_loc,source_chars,parse_error_flag,label"
-        );
-        assert_eq!(lines.next().unwrap(), "s001,C,2,1,1,4,1,1,0,0,0,0,0,0,1,2,0,0,3,100,25,6,10,150,0,Light");
+        assert_eq!(lines.next().unwrap(), super::CSV_HEADER);
+        assert_eq!(lines.next().unwrap(), "s001,C,2,1,1,4,1,1,0,1024,4096,3,1,0,0,0,0,0,1,2,0,0,3,100,25,6,10,150,0,Light");
         assert_eq!(lines.next(), None);
     }
 }
