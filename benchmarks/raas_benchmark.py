@@ -34,6 +34,8 @@ SUBCOMMANDS
               and write per-run + per-strategy result CSVs.
   simulate    Re-run the 10,000-submission macro simulation and the
               500-submission freeze burst from the measured profiles.
+  probe       Verify the judge actually emits AC/WA/RE/TLE/MLE, each from
+              ground truth rather than inference.
   all         fetch (if needed) -> run -> simulate.
   status      Show what corpus and results are currently on disk.
 
@@ -56,6 +58,7 @@ METROLOGY RULES (do not break these)
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import hashlib
 import heapq
@@ -152,10 +155,14 @@ LANG_EXT = {"python": "py", "cpp": "cpp", "java": "java", "c": "c"}
 DEFAULT_MIX = {"cpp": 40, "python": 35, "java": 25}
 
 # Test-case intake limits. The judge runs every case sequentially with a 10 s
-# per-case wall-clock guard, so an unbounded case list makes a run unbounded.
+# per-case wall-clock guard, so an unbounded case list makes a run unbounded:
+# one slow candidate then costs 10 s x cases on every single validation attempt.
+# The caps below keep individual cases fast while still spanning input shape
+# (single vs multi-case, short vs long) - which is the diversity that matters
+# for a scheduling benchmark, as opposed to megabyte inputs.
 MAX_CASES_PER_SUB = 5
-MAX_CASE_BYTES = 64 * 1024
-MAX_TOTAL_BYTES = 256 * 1024
+MAX_CASE_BYTES = 32 * 1024
+MAX_TOTAL_BYTES = 96 * 1024
 
 
 # --------------------------------------------------------------------------- #
@@ -244,6 +251,24 @@ def check_judge(quiet: bool = False) -> bool:
 # --------------------------------------------------------------------------- #
 # Source normalisation
 # --------------------------------------------------------------------------- #
+
+def is_python3(code: str) -> bool:
+    """True if the source parses as Python 3.
+
+    CodeContests language 1 (PYTHON) is largely Python 2, and the judge's Python
+    runtime is Python 3, so such a solution dies immediately with a SyntaxError
+    that the judge reports as RE. Left in, a Py2 candidate can also sit in front
+    of a perfectly good Py3 candidate for the same problem and burn every
+    validation attempt, which is what emptied a whole fetch.
+
+    ast.parse is an exact test, not a heuristic: `print x` simply does not parse.
+    """
+    try:
+        ast.parse(code)
+        return True
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        return False
+
 
 def normalize_java(code: str) -> str:
     """The runtime image compiles `/app/Main.java` and runs class `Main`.
@@ -458,17 +483,28 @@ def collect_candidates(want: dict[str, int], args) -> list[dict]:
             codes = sols.get("solution") or []
 
             # Group every candidate per language, best-language-variant first.
-            by_lang: dict[str, list[str]] = {}
-            order: dict[str, int] = {}
+            # The variant preference MUST be applied within a language, not just
+            # between languages: language 1 (PYTHON) and 3 (PYTHON3) both map to
+            # "python", and the stream is not ordered by quality, so a Py2 source
+            # could otherwise be candidate 0 ahead of a valid Py3 one.
+            entries: dict[str, list[tuple[int, int, str]]] = {}
+            seq = 0
             for l_id, code in zip(langs, codes):
                 lang = CC_LANG.get(l_id)
                 if not lang or not code or len(code.strip()) <= 20:
                     continue
+                if lang == "python" and not is_python3(code):
+                    continue
                 if lang == "java":
                     code = normalize_java(code)
-                pref = CC_LANG_PREF.get(l_id, 9)
-                by_lang.setdefault(lang, []).append(code)
-                order[lang] = min(order.get(lang, 99), pref)
+                entries.setdefault(lang, []).append(
+                    (CC_LANG_PREF.get(l_id, 9), seq, code))
+                seq += 1
+
+            by_lang: dict[str, list[str]] = {
+                L: [c for _, _, c in sorted(v)] for L, v in entries.items()}
+            order: dict[str, int] = {
+                L: min(p for p, _, _ in v) for L, v in entries.items()}
 
             # Take up to `per_problem_limit` languages for this problem, always
             # draining the language with the most unfilled quota first so the
@@ -1370,6 +1406,88 @@ def cmd_simulate(args) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Verdict probe: prove the judge emits every verdict it claims
+#
+# EXPERIMENTAL_RESULTS.md section 5 records that the TLE and MLE paths were only
+# ever exercised against a build that predated them, and asks for those probes
+# to be re-run after a rebuild. This is that re-run, as a permanent subcommand.
+# Each case is chosen so the verdict is derivable from ground truth rather than
+# inferred: TLE from the wall-clock guard, MLE from the kernel oom_kill counter.
+# --------------------------------------------------------------------------- #
+
+PROBE_AC = 'n = int(input())\nprint(sum(range(1, n + 1)))\n'
+PROBE_WA = 'n = int(input())\nprint(sum(range(1, n + 1)) + 1)\n'
+PROBE_RE = 'import sys\nsys.stderr.write("boom\\n")\nsys.exit(3)\n'
+PROBE_TLE = 'print("alive")\nwhile True:\n    pass\n'
+# Allocates from stdin so no large literal appears in the source: with the size
+# computed rather than written, the AST feature `large_alloc_flag` stays clear
+# and the classifier is more likely to route this to the bounded tier, which is
+# the only way a Light-tier submission can be OOM-killed.
+PROBE_MLE = (
+    'import sys\n'
+    'n = int(sys.stdin.readline())\n'
+    'b = bytearray(n * 1024 * 1024)\n'
+    'for i in range(0, len(b), 4096):\n'
+    '    b[i] = 1\n'
+    'print("ok")\n'
+)
+
+
+def cmd_probe(args) -> int:
+    if not check_judge():
+        return 1
+    log(f"\n=== VERDICT PROBES against {judge_url()} ===")
+    log(f"    tier={LIGHT_TIER_MB} MiB, watermark="
+        f"{LIGHT_TIER_MB * HIGH_WATERMARK_PCT // 100} MiB")
+
+    cases = [
+        ("ac",  "AC",  "python", PROBE_AC,  [{"input": "3", "expected": "6"}],
+         "baseline", "sum of 1..3 == 6"),
+        ("wa",  "WA",  "python", PROBE_WA,  [{"input": "3", "expected": "6"}],
+         "baseline", "prints the wrong answer with exit 0"),
+        ("re",  "RE",  "python", PROBE_RE,  [{"input": "", "expected": ""}],
+         "baseline", "exits non-zero for another reason"),
+        ("tle", "TLE", "python", PROBE_TLE, [{"input": "", "expected": "alive"}],
+         "baseline", "never terminates; killed by the 10 s guard"),
+        ("mle", "MLE", "python", PROBE_MLE, [{"input": "900", "expected": "ok"}],
+         "predictive", "allocates 900 MiB in a bounded tier"),
+    ]
+
+    failed = 0
+    for name, expect, lang, src, tests, strat, why in cases:
+        payload = {"id": f"probe_{name}", "language": lang, "approach": strat,
+                   "source": src, "test_cases": tests}
+        t0 = time.perf_counter()
+        res = submit(payload, timeout=max(args.timeout, 90.0))
+        dt = time.perf_counter() - t0
+        if res is None:
+            log(f"  {name.upper():4s} expected {expect:4s} -> NO RESPONSE     ({why})")
+            failed += 1
+            continue
+        got = res.get("verdict")
+        ok = got == expect
+        if not ok:
+            failed += 1
+        detail = (f"tier={res.get('tier_started'):4s} "
+                  f"prom={str(res.get('tier_promoted')):5s} "
+                  f"peak={(res.get('peak_memory_bytes') or 0)/1048576:8.1f}MB "
+                  f"cpu={res.get('cpu_time_ms'):>5}ms wall={res.get('wall_time_ms'):>6}ms "
+                  f"{dt:5.1f}s")
+        log(f"  {name.upper():4s} expected {expect:4s} -> {str(got):4s} "
+            f"[{'OK ' if ok else 'MISMATCH'}] {detail}")
+        if not ok:
+            log(f"        ({why})")
+
+    log(f"\n[{'OK' if failed == 0 else f'{failed} PROBE(S) FAILED'}] "
+        f"{len(cases) - failed}/{len(cases)} verdict paths verified")
+    if failed:
+        log("  A MISMATCH is a finding, not necessarily a bug: the MLE probe only")
+        log("  reaches the oom_kill path if the classifier routes it to the bounded")
+        log("  tier. Check `tier=` in the line above before concluding anything.")
+    return 1 if failed else 0
+
+
+# --------------------------------------------------------------------------- #
 # Preflight / status
 # --------------------------------------------------------------------------- #
 
@@ -1520,6 +1638,9 @@ def build_parser() -> argparse.ArgumentParser:
     a.set_defaults(func=None)  # handled in main
 
     sub.add_parser("preflight", help="check judge, images, cgroup mode, deps").set_defaults(func=cmd_preflight)
+    pr = sub.add_parser("probe", help="verify the judge emits AC/WA/RE/TLE/MLE from ground truth")
+    pr.add_argument("--timeout", type=float, default=120.0)
+    pr.set_defaults(func=cmd_probe)
     sub.add_parser("status", help="show corpus and results on disk").set_defaults(func=cmd_status)
     return p
 
