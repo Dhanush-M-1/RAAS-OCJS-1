@@ -187,27 +187,27 @@ curl -X POST localhost:3000/submit -H 'content-type: application/json' -d '{
 }
 ```
 
-| Field | Meaning |
-|---|---|
-| `verdict` | `AC` (ok), `WA` (wrong answer), `TLE`, `MLE`, `RE`, `CE`, `SE` (server exec error) |
-| `tier_started` | `low` (Light) / `high` (Heavy) — the tier the submission began in |
-| `tier_promoted` | `true` if the reactive path lifted the container's limits mid-run |
-| `promotion_time_ms` | wall-clock ms from submission start until the promotion write |
-| `peak_memory_bytes` | max physical RSS `memory.current` sampled during execution |
-| `allocated_memory_bytes` | configured cgroup memory limit (256 MiB for Light tier, 0 for Uncapped) |
-| `cpu_time_ms` | sum of per-case CPU time measured via cgroup v2 CFS `cpu.stat` delta |
-| `wall_time_ms` | total elapsed wall-clock time from request receipt to completion |
+| Field                    | Meaning                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| `verdict`                | `AC` (ok), `WA` (wrong answer), `TLE`, `MLE`, `RE`, `CE`, `SE` (server exec error) |
+| `tier_started`           | `low` (Light) / `high` (Heavy) — the tier the submission began in                  |
+| `tier_promoted`          | `true` if the reactive path lifted the container's limits mid-run                  |
+| `promotion_time_ms`      | wall-clock ms from submission start until the promotion write                      |
+| `peak_memory_bytes`      | max physical RSS `memory.current` sampled during execution                         |
+| `allocated_memory_bytes` | configured cgroup memory limit (256 MiB for Light tier, 0 for Uncapped)            |
+| `cpu_time_ms`            | sum of per-case CPU time measured via cgroup v2 CFS `cpu.stat` delta               |
+| `wall_time_ms`           | total elapsed wall-clock time from request receipt to completion                   |
 
 ### Verdicts
 
-| Verdict | Emitted when |
-|---|---|
-| `AC` | every case's stdout matched the expected output |
-| `WA` | the program ran and exited 0, but stdout differed |
-| `TLE` | a case exceeded the **10 s** wall-clock limit (`CASE_TIMEOUT` in `docker.rs`); the process is killed inside the container |
-| `MLE` | the kernel's `oom_kill` counter in `memory.events` rose during the case — the submission hit `memory.max` and was killed |
-| `RE` | the program exited non-zero for any other reason (segfault, uncaught exception, compile failure) |
-| `SE` | the judge itself failed (Docker unavailable, container start error) |
+| Verdict | Emitted when                                                                                                              |
+| ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `AC`    | every case's stdout matched the expected output                                                                           |
+| `WA`    | the program ran and exited 0, but stdout differed                                                                         |
+| `TLE`   | a case exceeded the **10 s** wall-clock limit (`CASE_TIMEOUT` in `docker.rs`); the process is killed inside the container |
+| `MLE`   | the kernel's `oom_kill` counter in `memory.events` rose during the case — the submission hit `memory.max` and was killed  |
+| `RE`    | the program exited non-zero for any other reason (segfault, uncaught exception, compile failure)                          |
+| `SE`    | the judge itself failed (Docker unavailable, container start error)                                                       |
 
 `TLE` and `MLE` are both read from ground truth rather than inferred: `TLE` from
 a wall-clock guard, `MLE` from the kernel's monotonic `oom_kill` counter (which
@@ -225,8 +225,10 @@ Predictive; under Reactive and Hybrid the monitor normally promotes it first, so
 The judge keeps **one Docker container per submission** (`--network=none`, own
 rootfs/namespaces) for isolation — exactly how a real OJ behaves — but reaches
 into that container's **cgroup v2 directory directly from the host** with plain
-file I/O (sub-millisecond, no Docker daemon round-trip, `docker update` is never
-used). The mechanism, per submission:
+file I/O (sub-millisecond, no Docker daemon round-trip). The authoritative
+promotion is the host-side file write; `docker update` is issued _afterwards_ so
+the Docker daemon's own accounting agrees, and becomes the sole mechanism only in
+the degraded fallback path. The mechanism, per submission:
 
 ```
 docker run --cpus=1 --memory=256m --network=none <runtime-image>   # Low tier start
@@ -235,10 +237,15 @@ write memory.high 187904819      # arm the ~179.2 MiB (70%) soft watermark (Dock
 for each test case (docker exec):
   poll memory.events + memory.current every ~2 ms
   if the 'high' counter grew since the last poll  -> policy.should_promote()?
-  yes -> write memory.high=max, memory.max=max   # unlimited == Baseline/Predictive 'High'
+  yes -> write memory.high=max, memory.max=max   # unlimited == Baseline/Predictive 'High'  (authoritative)
+         docker update --memory 0 --memory-swap -1 --cpus 0   # sync daemon view
          record tier_promoted=true, promotion_time_ms
   track max memory.current sampled  -> CaseResult.peak_memory_bytes
 docker rm -f
+
+# FALLBACK — only when the host cgroup dir is not reachable (e.g. Docker Desktop VM):
+#   poll `docker exec <c> cat /sys/fs/cgroup/memory.current`
+#   on breach -> `docker update --memory 0 --memory-swap -1 --cpus 0` (no host write possible)
 ```
 
 - **Reactive** starts Low and promotes on pressure; **Hybrid** starts at the

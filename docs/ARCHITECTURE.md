@@ -19,7 +19,7 @@ flowchart TD
 
     B["Tree-sitter Multi-AST<br/>(Python/C++/Java/C)"]:::parser
 
-    C["Rust Feature Extractor (22+10)<br/>(AST Topology, Loops, Collections)"]:::processing
+    C["Rust Feature Extractor (22 AST metrics)<br/>+ 10 engineered ratios in training<br/>(AST Topology, Loops, Collections)"]:::processing
 
     D["Compiled XGBoost Model (m2cgen)<br/>(Zero Python runtime dependency)"]:::model
 
@@ -33,7 +33,7 @@ flowchart TD
 
     G --> H{"Watermark Breached? (cur >= 179.2 MB / 70%)"}:::decision
 
-    H -->|YES| I["Live Container Promotion<br/>docker update --memory 0<br/>Lift to Uncapped Tier"]:::promotion
+    H -->|YES| I["Live Container Promotion<br/>write memory.high=max<br/>write memory.max=max<br/>Lift to Uncapped Tier"]:::promotion
 
     H -->|NO| J["Continue Execution<br/>in Light Tier"]:::light
 
@@ -74,9 +74,9 @@ Built with Rust and Tree-sitter bindings for multi-language AST extraction:
 
 ### 2.2 Embedded Inference Engine (`server/src/predict.rs`)
 To ensure sub-millisecond evaluation latency and zero Python runtime overhead:
-- Offline models are trained on IBM Project CodeNet using Python and scikit-learn/xgboost.
-- Models are transpiled into pure Rust code via `m2cgen` (`server/src/generated/`).
-- Specialized models exist for Python, C++, Java, and C, with calibrated decision thresholds ($0.200$ to $0.346$).
+- Offline models are trained on IBM Project CodeNet **or** DeepMind CodeContests using Python and scikit-learn/xgboost.
+- Models are transpiled into pure Rust code via `m2cgen` (`server/src/generated/`). Only the Python, C++, Java, and unified multi-language models are exported, with calibrated decision thresholds ($0.200$ to $0.346$).
+- **C submissions are scored by the C++ specialised model** at $\tau = 0.346$; `regenerate_models.sh` does not export the C-specialised model. Re-sync these thresholds from `artifacts/model_comparison.csv` after every retrain.
 - The judge evaluates model inference in $< 5\text{ µs}$ on the hot path without spawning subprocesses or loading weights dynamically.
 
 ### 2.3 Container Isolation & Kernel cgroup v2 (`server/src/docker.rs`, `server/src/moderator.rs`)
@@ -93,14 +93,15 @@ Submissions run inside dedicated rootless/daemon sandboxes utilizing Linux cgrou
 ### 2.4 Reactive Monitor & Live Tier Migration (`server/src/moderator.rs`)
 - Polling loop runs on a 2 ms tick (`MONITOR_POLL`).
 - Reads monotonic `memory.events` delta and `memory.current`.
-- On watermark breach (`cur >= 179.2MB` / 70% or `high_crossed`), the moderator executes:
+- On watermark breach (`cur >= 179.2MB` / 70% or `high_crossed`), the moderator promotes the container **in place** by writing the unlimited token to the host cgroup files, then issues `docker update` so the daemon's own accounting agrees:
   ```rust
-  cg.promote_to_unlimited()?;
+  cg.promote_to_unlimited()?;              // memory.high=max; memory.max=max   (authoritative)
   Command::new("docker")
       .args(["update", container, "--memory", "0", "--memory-swap", "-1", "--cpus", "0"])
       .output()
-      .await?;
+      .await?;                             // keep the Docker daemon's view in sync
   ```
+  > If the host cgroup directory is **not** directly reachable (e.g. Docker Desktop inside a VM), the judge degrades to a fallback that samples `memory.current` via `docker exec` and relies on `docker update` alone.
 - The container transitions from **Light (256 MiB)** to **Heavy (Uncapped)** mid-execution in under 15 ms, without dropping open file descriptors, child PIDs, or execution state.
 - **Host Privileges & Delegation**: Because writing to `/sys/fs/cgroup/system.slice/docker-<id>.scope/memory.high` touches systemd-managed kernel cgroup controllers, the judge server process must be run with root / sudo permissions (`sudo ./target/debug/server`) or systemd slice delegation. Running without root results in `Permission denied (os error 13)` and suppresses pressure event generation, preventing live promotion.
 

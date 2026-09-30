@@ -25,7 +25,7 @@ Our results demonstrate:
 3. **Burst Throughput and Zero Queue Wait**: Under a 500-submission freeze rush arriving in 30 seconds on the 15 GiB host, safe baseline slots (7 slots) suffer an average queue wait of **15,253.0 ms (~15.3 s)** and a P95 turnaround latency of **29,011.2 ms (~29.0 s)**. RAAS-OCJS safely expands concurrency to **28 slots**, driving average queue wait to **0.0 ms** and P95 turnaround to **1,311.0 ms (22.1x speedup)**, draining the entire burst in 31.0 seconds.
 4. **Cloud Provisioning Economics**: When extrapolated to a cloud cluster (e.g., AWS EC2 `c6i.4xlarge` instances with 32 GB RAM @ USD 0.68/hr), RAAS-OCJS expands container packing density from 14 to **64 to 100+ concurrent pods per node**, reducing the active VM fleet required to absorb traffic surges from **36 VMs down to 8 VMs (77.8% fleet reduction)** and cutting hourly cluster expenditure from **USD 24.48 down to USD 5.44 / hour (saving USD 19.04/hour, a 77.8% cost cut)**.
 5. **Dynamic Watermark Precision**: Tuned to a 70% soft watermark (179.2 MiB), the Reactive engine achieved **100% precision**—zero false-positive promotions on light algorithmic tasks across all languages, zero OOM kills, and dynamic live promotions across 100% of memory-heavy dynamic programming tasks.
-6. **End-to-End Latency Profile**: We measure and decompose the complete lifecycle from HTTP request ingestion to verdict JSON delivery, demonstrating that in-flight cgroup watermark transitions add less than 3 ms of kernel overhead.
+6. **End-to-End Latency Profile**: We measure and decompose the complete lifecycle from HTTP request ingestion to verdict JSON delivery. The in-flight limit-lifting operation itself (the host-side cgroup `memory.high`/`memory.max` writes plus the `docker update`) completes in single-digit milliseconds; the end-to-end *time-to-promotion* measured from submission start is instead dominated by the runtime's page-commit rate and ranges from **259 ms (Python)** to **817 ms (Java)** on the calibration host (see `EXPERIMENTAL_RESULTS.md` §2).
 
 ---
 
@@ -520,9 +520,22 @@ RAAS-OCJS demonstrates that **adaptive tiered scheduling with a 70% soft waterma
 
 ## Appendix: Reproducibility & Artifact Index
 
-All empirical datasets, simulation scripts, and server daemon source files are open-source and directly reproducible:
+All empirical datasets, simulation scripts, and server daemon source files are open-source and directly reproducible. See [`SETUP_GUIDE.md`](SETUP_GUIDE.md) for the full build sequence; to regenerate the `benchmarks/real_dataset_*.csv` files:
+
+```bash
+# 1. Build the sandbox images, then start the judge with sudo (required for live promotion)
+docker build -t python-judge-runtime server/runtimes/python
+docker build -t cpp-judge-runtime    server/runtimes/cpp
+docker build -t java-judge-runtime   server/runtimes/java
+(cd server && cargo build && sudo ./target/debug/server) &
+
+# 2. Drive the harness against the local daemon (it defaults to a LAN IP, so override it)
+JUDGE_URL=http://localhost:3000 python3 benchmarks/run_codenet_benchmarks.py
+```
+
 - **Judge Daemon Source**: `server/src/main.rs`, `server/src/docker.rs`, `server/src/moderator.rs`, `server/src/policy.rs`
 - **Benchmarking Engine**: `benchmarks/run_codenet_benchmarks.py`
+- **Harness knobs**: `JUDGE_URL`, `LIGHT_TIER_MB` (must match the server's low tier), `BENCH_SEED`
 - **Empirical Execution Records (72 Runs)**: `benchmarks/real_dataset_empirical_runs.csv`
 - **Macro-Scale Strategy Summary**: `benchmarks/real_dataset_strategy_summary.csv`
 - **Granular Language Metrics**: `benchmarks/real_dataset_language_metrics.csv`

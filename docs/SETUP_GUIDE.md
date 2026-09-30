@@ -107,7 +107,11 @@ http://localhost:5173
 
 ## 5. Model Training & Regeneration Workflow (Optional)
 
-If you modify the training dataset or hyperparameters in `model-training/`:
+The predictive models are **already compiled into the judge** (`server/src/generated/`), so this section is only needed if you change the dataset or hyperparameters. Both datasets write into the **same** `./artifacts/` and `server/src/generated/`, so a retrain simply overwrites the models the judge uses.
+
+Full details and benchmark tables: [`model-training/README.md`](../model-training/README.md).
+
+### 5.1 Environment setup
 
 ```bash
 cd model-training
@@ -115,20 +119,95 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Run feature extraction on dataset and train XGBoost models
-python3 train_advanced_xgboost.py
+# Build the Rust Tree-sitter feature extractor once:
+cd ../feature-extraction-pipeline
+cargo build --release --bin OJ-feature-extraction-spike
+cd ../model-training
+```
 
-# Transpile models into Rust code for the judge
-./regenerate_models.sh
+### 5.2 Option A — IBM Project CodeNet
 
-# Recompile judge server with updated weights
+```bash
+python3 extract_dataset.py \
+    --codenet-root "/path/to/Project_CodeNet" \
+    --output-dir "./codenet_subset" \
+    --manifest "./sample_manifest.csv" \
+    --per-stratum 10000 --workers 64
+
+../feature-extraction-pipeline/target/release/OJ-feature-extraction-spike \
+    ./codenet_subset ./features.csv
+
+python3 train_advanced_xgboost.py \
+    --features-csv "./features.csv" \
+    --manifest-csv "./sample_manifest.csv" \
+    --output-dir "./artifacts"
+```
+
+### 5.3 Option B — DeepMind CodeContests (streamed from HuggingFace, no external drive)
+
+```bash
+python3 extract_codecontests.py \
+    --output-dir "./codecontests_subset" \
+    --manifest "./sample_manifest_codecontests.csv" \
+    --per-stratum 5000
+
+../feature-extraction-pipeline/target/release/OJ-feature-extraction-spike \
+    ./codecontests_subset ./features_codecontests.csv
+
+python3 train_advanced_xgboost.py \
+    --features-csv "./features_codecontests.csv" \
+    --manifest-csv "./sample_manifest_codecontests.csv" \
+    --output-dir "./artifacts"
+```
+
+> ⚠️ **Destructive:** `extract_codecontests.py` runs `rm -rf` on `--output-dir` and `--manifest` before writing. It also needs network access to HuggingFace and the `datasets` package (installed via `requirements.txt`).
+
+### 5.4 Transpile the models into Rust (m2cgen)
+
+```bash
+./regenerate_models.sh        # artifacts/*.joblib -> ../server/src/generated/*.rs
+```
+
+### 5.5 Sync the decision thresholds — do not skip this step
+
+`train_advanced_xgboost.py` writes an **Optimal Threshold** per model into `artifacts/model_comparison.csv`. The judge hard-codes those thresholds as constants in [`server/src/predict.rs`](../server/src/predict.rs), so a retrain that skips this step ships **new weights with stale decision boundaries**.
+
+Copy each model's threshold from `artifacts/model_comparison.csv` into the matching `THRESHOLD_*` constant, then rebuild the server:
+
+```bash
 cd ../server
 cargo build
 ```
 
+> Only the Python, C++, Java, and unified models are exported. **C submissions are scored by the C++ specialised model**, so they use the C++ threshold.
+
 ---
 
-## 6. Troubleshooting
+## 6. Real-Dataset Benchmark Harness (Optional)
+
+[`benchmarks/run_codenet_benchmarks.py`](../benchmarks/run_codenet_benchmarks.py) drives the live judge with real competitive-programming problems streamed from HuggingFace and writes the `benchmarks/real_dataset_*.csv` result files.
+
+**Requirements:** a running judge server (see §3) and the Python dependencies from `model-training/requirements.txt`.
+
+```bash
+# IMPORTANT: the harness defaults to a LAN IP (http://192.168.0.111:3000),
+# not localhost. Override it to point at your local server:
+JUDGE_URL=http://localhost:3000 python3 benchmarks/run_codenet_benchmarks.py
+```
+
+Environment knobs:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `JUDGE_URL` | `http://192.168.0.111:3000` | Judge base URL (used for `/health` and `/submit`) |
+| `LIGHT_TIER_MB` | `256` | Must match the server's own low-tier size, or all derived slot/cloud figures are invalid |
+| `BENCH_SEED` | `42` | Seeds the stochastic simulation scenarios for reproducible figures |
+
+The harness runs four phases in order: empirical per-submission evaluation → macro contest simulation (N = 10,000) → summary export → burst-stress simulation. It exits immediately if `/health` does not return `{"status":"OK"}` — start the server first.
+
+---
+
+## 7. Troubleshooting
 
 ### Permission denied (os error 13) on `memory.high`
 **Cause**: The judge server process does not have write permissions to the cgroup controller file.  

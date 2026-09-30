@@ -59,7 +59,7 @@ Given $N$ items and a total knapsack capacity $W$, compute the optimal subset va
 ### Behavior Under Test
 1. The container launches in the Light tier with a 256 MiB hard limit and 179.2 MiB (70%) soft watermark.
 2. During the DP execution, memory commitment exceeds 179.2 MiB.
-3. The reactive monitor detects the event and issues `docker update --memory 0 --cpus 0`.
+3. The reactive monitor detects the event and lifts the limits in place — writing `memory.high=max` / `memory.max=max` to the container's host cgroup directory, then issuing `docker update --memory 0 --memory-swap -1 --cpus 0`.
 4. The container is promoted live to Uncapped at **~538 ms** without process interruption.
 
 ---

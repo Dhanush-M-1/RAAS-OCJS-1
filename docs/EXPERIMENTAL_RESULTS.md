@@ -36,9 +36,11 @@ deadline and the 256 MiB tier limit.
 P2 is the only problem whose fixtures (200 MiB, 210 MiB) cross the 179.2 MiB
 soft watermark, so it is the only one that exercises live promotion. Under the
 Reactive and Hybrid strategies the container starts in Tier 1 (256 MiB), the
-kernel raises a `memory.high` pressure event, and the judge issues
-`docker update --memory 0 --cpus 0` while the process keeps running. No
-container is restarted and no process state is lost.
+kernel raises a `memory.high` pressure event, and the judge lifts the limits in
+place — it writes `memory.high=max` / `memory.max=max` to the container's host
+cgroup directory and follows with `docker update --memory 0 --memory-swap -1
+--cpus 0` — while the process keeps running. No container is restarted and no
+process state is lost.
 
 | Language | Strategy | Verdict | Started | Promoted | Promotion time | Peak RSS | Verdict after promotion |
 |---|---|---|---|---|---|---|---|
@@ -68,11 +70,12 @@ the size of the allocation:
 
 **These are 2-3 orders of magnitude larger than the ~3 ms quoted in earlier
 drafts of this document.** That earlier figure measured only the duration of
-the `docker update` call itself, not the time from submission start until the
-watermark is crossed. The two are different quantities; the 259-817 ms figures
-above are the wall-clock time from accepting a submission to writing the lifted
-limit, which is the number that bounds how long a heavy submission spends
-constrained. The paper uses the latter.
+the limit-lifting call itself (the cgroup write plus the `docker update`), not
+the time from submission start until the watermark is crossed. The two are
+different quantities; the 259-817 ms figures above are the wall-clock time from
+accepting a submission to writing the lifted limit, which is the number that
+bounds how long a heavy submission spends constrained. The paper uses the
+latter.
 ## 3. Full Measured Matrix
 
 Peak RSS in MB, CPU time from `cpu.stat` in ms. `Light` = started in the

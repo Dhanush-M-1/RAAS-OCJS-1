@@ -35,7 +35,7 @@ RAAS-OCJS evaluates four distinct scheduling paradigms against a common containe
 ### 2.2 Predictive Strategy
 - **Mechanism**: Uses pre-execution static analysis.
   1. Tree-sitter parses the source code into an Abstract Syntax Tree.
-  2. Feature extractor scans the AST in a single pass to compute 22 structural metrics and 10 engineered density ratios.
+  2. Feature extractor scans the AST in a single pass to compute 22 structural metrics; the training pipeline then adds 10 engineered density ratios (32 features per language, 36 for the unified model).
   3. Pre-compiled XGBoost inference function (`score(features)`) outputs a probability score $P(\text{Heavy})$.
   4. If $P(\text{Heavy}) \ge \tau_{\text{lang}}$, assign `Tier::High`; otherwise, assign `Tier::Low`.
 - **Thresholds** (from `model-training/artifacts/model_comparison.csv`):
@@ -70,7 +70,7 @@ RAAS-OCJS evaluates four distinct scheduling paradigms against a common containe
 - **Monitoring Loop**:
   - Spawns an asynchronous monitoring task polling every 2 ms.
   - Checks if `memory.current >= 179.2 MiB` (70%) or if the kernel has incremented the monotonic `high` counter in `memory.events`.
-  - When the threshold is crossed, the moderator calls `docker update --memory 0 --cpus 0`.
+  - When the threshold is crossed, the moderator lifts the limits in place: it writes `memory.high=max` and `memory.max=max` directly to the container's host cgroup directory (`promote_to_unlimited()`), then issues `docker update --memory 0 --memory-swap -1 --cpus 0` so the Docker daemon's accounting agrees. (If the host cgroup directory is unreachable — e.g. Docker Desktop in a VM — only the `docker update` fallback runs.)
 - **Container Lifecycle**:
   ```
   Spawn Light Container (256M) -> Set memory.high=179.2M (70%) -> Start Exec Task || Start Monitor Task ->

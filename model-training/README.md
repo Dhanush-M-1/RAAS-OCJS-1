@@ -13,7 +13,7 @@ This directory contains the dataset extraction, GPU-accelerated XGBoost training
 Sampled Dataset Directory (subset/) + Manifest CSV (sample_manifest.csv)
        │
        ▼ [feature-extraction-pipeline] (Rust Tree-sitter Extractor)
-features.csv (26 AST & Structural Complexity Metrics)
+features.csv (22 AST features + metadata; +10 engineered in training = 32/36-feature vectors)
        │
        ▼ [train_advanced_xgboost.py] (5-Fold GroupKFold on Unseen Problems)
 artifacts/  →  model_*.joblib  ·  model_*.json  ·  treelite_*.checkpoint
@@ -61,7 +61,7 @@ python3 extract_dataset.py \
     --per-stratum 10000 \
     --workers 64
 
-# Step 2: Extract 26 AST features in Rust (< 15 seconds)
+# Step 2: Extract 22 AST features in Rust (< 15 seconds)
 ../feature-extraction-pipeline/target/release/OJ-feature-extraction-spike \
     ./codenet_subset \
     ./features.csv
@@ -74,11 +74,14 @@ python3 train_advanced_xgboost.py \
 
 # Step 4: Compile the trained models into Rust for the judge (m2cgen)
 ./regenerate_models.sh
-# then rebuild the judge so the new weights are baked in:
+
+# Step 5: Sync the new decision thresholds into the judge, then rebuild.
+#   Copy the "Optimal Threshold" values from ./artifacts/model_comparison.csv
+#   into the THRESHOLD_* constants in ../server/src/predict.rs.
 cd ../server && cargo build && cd ../model-training
 ```
 
-> **Working directory note:** Steps 1–3 run from `model-training/`. Step 4 runs
+> **Working directory note:** Steps 1–3 run from `model-training/`. Steps 4–5 run
 > `regenerate_models.sh` from `model-training/` too — it writes
 > `server/src/generated/*.rs` automatically.
 
@@ -87,6 +90,11 @@ cd ../server && cargo build && cd ../model-training
 ### Option B: Training on DeepMind CodeContests (Modern Algorithmic Benchmark)
 Streams directly from HuggingFace (`deepmind/code_contests` - Codeforces, CodeChef, HackerEarth) with no external drive required.
 
+> ⚠️ **Destructive step:** `extract_codecontests.py` runs `rm -rf` on both
+> `--output-dir` and `--manifest` before it writes. Do not point `--output-dir`
+> at a directory you intend to keep, and note it also requires network access to
+> HuggingFace plus the `datasets` package (installed via `requirements.txt`).
+
 ```bash
 # Step 1: Stream and extract balanced submissions (5,000 per stratum - empirical sweet spot)
 python3 extract_codecontests.py \
@@ -94,7 +102,7 @@ python3 extract_codecontests.py \
     --manifest "./sample_manifest_codecontests.csv" \
     --per-stratum 5000
 
-# Step 2: Extract 26 AST features in Rust (< 10 seconds)
+# Step 2: Extract 22 AST features in Rust (< 10 seconds)
 ../feature-extraction-pipeline/target/release/OJ-feature-extraction-spike \
     ./codecontests_subset \
     ./features_codecontests.csv
@@ -107,11 +115,14 @@ python3 train_advanced_xgboost.py \
 
 # Step 4: Compile the trained models into Rust for the judge (m2cgen)
 ./regenerate_models.sh
-# then rebuild the judge so the new weights are baked in:
+
+# Step 5: Sync the new decision thresholds into the judge, then rebuild.
+#   Copy the "Optimal Threshold" values from ./artifacts/model_comparison.csv
+#   into the THRESHOLD_* constants in ../server/src/predict.rs.
 cd ../server && cargo build && cd ../model-training
 ```
 
-> **Working directory note:** Steps 1–3 run from `model-training/`. Step 4 runs
+> **Working directory note:** Steps 1–3 run from `model-training/`. Steps 4–5 run
 > `regenerate_models.sh` from `model-training/` too — it writes
 > `server/src/generated/*.rs` automatically. Both Option A and Option B write
 > into the **same** `./artifacts/` and `server/src/generated/`, so retraining on

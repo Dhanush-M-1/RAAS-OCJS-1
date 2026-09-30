@@ -2,7 +2,7 @@
 
 An interactive real-time benchmarking dashboard for evaluating Resource-Aware Adaptive Scheduling strategies on an Online Competitive Judge System.
 
-Built with **React 18**, **TypeScript**, **Vite**, **Tailwind CSS**, and **Recharts**.
+Built with **React 19**, **TypeScript**, **Vite**, **Tailwind CSS**, and **Recharts**.
 
 ---
 

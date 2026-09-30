@@ -64,7 +64,7 @@ flowchart TD
     E --> G["cgroup v2 Reactive Monitor<br/>(2ms tick)"]
     G --> H{"cur >= 179.2 MB (70%)?"}
 
-    H -->|YES| I["Live Promotion<br/><br/>docker update<br/>→ Uncapped"]
+    H -->|YES| I["Live Promotion<br/><br/>write memory.high=max<br/>write memory.max=max<br/>→ Uncapped"]
     H -->|NO| J["Continue in Light Tier"]
 
     I --> K["Microsecond CFS cpu.stat Accounting"]
@@ -100,7 +100,7 @@ The system includes five high-stakes competition problems modeled after **Codefo
    - Reduces execution measurement variance from $\pm 200\%$ down to $\le \pm 4\%$.
 2. **Soft Watermark Live Migration (`memory.high`)**:
    - Uses `memory.high = 179.2 MiB` (70% of `memory.max`) to detect pressure *before* reaching the 256 MiB hard limit (`memory.max`), preventing kernel OOM-killer panics while avoiding premature tier migration.
-   - Executes live container expansion (`docker update --memory 0 --cpus 0`) in $< 15\text{ ms}$ without dropping running processes.
+   - Executes live container expansion by writing `memory.high=max` and `memory.max=max` directly to the container's host cgroup v2 directory, then issuing `docker update --memory 0 --memory-swap -1 --cpus 0` to keep the Docker daemon's view in sync, in $< 15\text{ ms}$ without dropping running processes.
 3. **Unified Allocated vs. Used Memory Tracking**:
    - Explicitly records both the **Peak Memory Used** (actual RSS footprint) and **Memory Allocated** (assigned tier ceiling), enabling direct quantification of infrastructure savings.
 
@@ -139,8 +139,8 @@ Full per-language matrix, promotion traces, and threats to validity: [`docs/EXPE
 - **Judge Server**: Rust (Tokio, Axum, cgroups v2, Linux namespaces).
 - **AST Parsing**: Tree-sitter Rust bindings (C, C++, Java, Python).
 - **ML Inference**: XGBoost transpiled to pure Rust via `m2cgen` (zero Python dependency at runtime).
-- **Frontend Visualizer**: React 18, TypeScript, Vite, Tailwind CSS, Recharts.
-- **Dataset**: IBM Project CodeNet (13.9M submissions).
+- **Frontend Visualizer**: React 19, TypeScript, Vite, Tailwind CSS, Recharts.
+- **Training Data**: IBM Project CodeNet (13.9M submissions) *or* DeepMind CodeContests (streamed directly from HuggingFace — no external drive required).
 
 ---
 
@@ -152,11 +152,37 @@ Detailed architectural and technical documentation is available in the [`docs/`]
 - [**Scheduling Strategies** (`docs/SCHEDULING_STRATEGIES.md`)](docs/SCHEDULING_STRATEGIES.md): Formal breakdown of Baseline, Predictive, Reactive, and Hybrid policies.
 - [**Benchmark Suite** (`docs/BENCHMARK_SUITE.md`)](docs/BENCHMARK_SUITE.md): Mathematical formulations, complexity, and test cases for all 5 competition problems.
 - [**Experimental Results** (`docs/EXPERIMENTAL_RESULTS.md`)](docs/EXPERIMENTAL_RESULTS.md): Empirical data, stability measurements, and memory savings analysis.
-- [**Setup & Developer Guide** (`docs/SETUP_GUIDE.md`)](docs/SETUP_GUIDE.md): Complete setup instructions for running the judge server and frontend.
+- [**Setup & Developer Guide** (`docs/SETUP_GUIDE.md`)](docs/SETUP_GUIDE.md): Complete setup instructions for the judge server, the frontend, the model pipeline, and the benchmark harness.
+- [**Model Training Pipeline** (`model-training/README.md`)](model-training/README.md): Dataset extraction (CodeNet **or** CodeContests) → Rust AST feature extraction → XGBoost training → `m2cgen` transpilation into the judge binary.
+- [**Feature Extraction Pipeline** (`feature-extraction-pipeline/README.md`)](feature-extraction-pipeline/README.md): The 22 core AST features emitted by the Rust Tree-sitter extractor, plus the 10 engineered ratios added during training (32 features per language; 36 unified).
 
 ---
 
 ## 09. Quick Start
+
+The predictive models are **already compiled into the judge** ([`server/src/generated/`](server/src/generated/)), so steps 1–3 are the only ones required to *run* the system. Step 0 is only needed if you want to retrain on a different dataset (e.g. CodeContests).
+
+### 0. (Optional) Retrain the models on CodeContests
+```bash
+cd model-training
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+python3 extract_codecontests.py --output-dir ./codecontests_subset \
+    --manifest ./sample_manifest_codecontests.csv --per-stratum 5000
+
+(cd ../feature-extraction-pipeline && cargo build --release --bin OJ-feature-extraction-spike)
+../feature-extraction-pipeline/target/release/OJ-feature-extraction-spike \
+    ./codecontests_subset ./features_codecontests.csv
+
+python3 train_advanced_xgboost.py --features-csv ./features_codecontests.csv \
+    --manifest-csv ./sample_manifest_codecontests.csv --output-dir ./artifacts
+
+./regenerate_models.sh        # artifacts/*.joblib -> server/src/generated/*.rs
+```
+Then **sync the new decision thresholds** from `artifacts/model_comparison.csv` into [`server/src/predict.rs`](server/src/predict.rs:22) before building the server. Full details: [`model-training/README.md`](model-training/README.md).
+
+> ⚠️ `extract_codecontests.py` runs `rm -rf` on `--output-dir` and `--manifest` before writing — do not point it at data you need.
 
 ### 1. Build Sandbox Images
 ```bash
@@ -182,6 +208,14 @@ npm install
 npm run dev
 ```
 Navigate to `http://localhost:5173` to launch the multi-strategy visualizer.
+
+### 4. Benchmark Against the Real Dataset (optional)
+With the server still running, in a third terminal:
+```bash
+# The harness defaults to a LAN IP (http://192.168.0.111:3000) — override it:
+JUDGE_URL=http://localhost:3000 python3 benchmarks/run_codenet_benchmarks.py
+```
+This streams real problems from `deepmind/code_contests`, validates each solution, and regenerates [`benchmarks/real_dataset_*.csv`](benchmarks/real_dataset_strategy_summary.csv). See [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) §7.
 
 ---
 
