@@ -83,6 +83,11 @@ function tierLabel(tier: string): string {
   return tier === 'low' ? 'Light' : 'Heavy'
 }
 
+function resultTierLabel(result: JudgeResult): string {
+  if (!result.tier_promoted) return tierLabel(result.tier_started)
+  return `${tierLabel(result.tier_started)} → ${tierLabel('high')}`
+}
+
 function formatBytes(bytes: number): string {
   if (!bytes) return '0 B'
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
@@ -733,8 +738,8 @@ function JudgePage() {
                                     <StatusChip tone={verdictTone(r.verdict)}>{r.verdict}</StatusChip>
                                   </td>
                                   <td className="py-2.5 pr-3">
-                                    <StatusChip tone={tierTone(r.tier_started)} mono={false}>
-                                      {tierLabel(r.tier_started)}
+                                    <StatusChip tone={tierTone(r.tier_promoted ? 'high' : r.tier_started)} mono={false}>
+                                      {resultTierLabel(r)}
                                     </StatusChip>
                                   </td>
                                   {metric === 'memory' ? (
