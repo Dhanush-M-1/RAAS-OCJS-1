@@ -54,6 +54,16 @@ pub fn low_mem_high_watermark() -> u64 {
 /// shorter than the interval.
 const MONITOR_POLL: Duration = Duration::from_millis(2);
 
+/// Ceiling used when promotion has to go through `docker update` because the
+/// host cgroup directory is not reachable (the Docker-Desktop-style fallback).
+///
+/// It must be an explicit finite value. `--memory 0` is **not** "unlimited" for
+/// `docker update`: Docker reads 0 as "no change", re-reconciles the container's
+/// cgroup against its configured limit, and silently discards the promotion.
+/// The value only needs to exceed any submission we are willing to run; the
+/// host's own memory is the real ceiling.
+const PROMOTED_MEMORY_CEILING: &str = "8g";
+
 fn image_for(language: &str) -> &'static str {
     match language {
         "python" => "python-judge-runtime",
@@ -308,13 +318,29 @@ async fn run_case_monitored(
                             let signal =
                                 MonitorSignal::new(cur, low_mem_high_watermark(), true);
                             if policy.should_promote(&signal) {
-                                let _ = cg.promote_to_unlimited();
-                                let _ = Command::new("docker")
-                                    .args(["update", container, "--memory", "0", "--memory-swap", "-1", "--cpus", "0"])
-                                    .output()
-                                    .await;
-                                *promoted = true;
-                                *promotion_time_ms = started.elapsed().as_millis() as u64;
+                                // The cgroup write IS the promotion: it lifts
+                                // memory.high and memory.max to `max`.
+                                //
+                                // Do NOT follow this with `docker update
+                                // --memory 0`: Docker treats 0 as "no change"
+                                // and re-reconciles the cgroup back to the
+                                // container's configured limit, restoring the
+                                // 256 MiB cap one line after it was lifted.
+                                // The container then dies at exactly the old
+                                // ceiling while still reporting promoted=true.
+                                match cg.promote_to_unlimited() {
+                                    Ok(()) => {
+                                        *promoted = true;
+                                        *promotion_time_ms =
+                                            started.elapsed().as_millis() as u64;
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "[moderator] promotion failed for \
+                                             {container}: {e}"
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
@@ -341,12 +367,36 @@ async fn run_case_monitored(
                                     let signal =
                                         MonitorSignal::new(cur, low_mem_high_watermark(), true);
                                     if policy.should_promote(&signal) {
-                                        let _ = Command::new("docker")
-                                            .args(["update", container, "--memory", "0", "--memory-swap", "-1", "--cpus", "0"])
+                                        // No host cgroup path (Docker-Desktop-style
+                                        // setups). `--memory 0` is a no-op here as
+                                        // well: Docker reads 0 as "no change", so
+                                        // only an explicit finite ceiling actually
+                                        // raises the limit.
+                                        let raised = Command::new("docker")
+                                            .args([
+                                                "update", container,
+                                                "--memory", PROMOTED_MEMORY_CEILING,
+                                                "--memory-swap", PROMOTED_MEMORY_CEILING,
+                                                "--cpus", "0",
+                                            ])
                                             .output()
                                             .await;
-                                        *promoted = true;
-                                        *promotion_time_ms = started.elapsed().as_millis() as u64;
+                                        match raised {
+                                            Ok(o) if o.status.success() => {
+                                                *promoted = true;
+                                                *promotion_time_ms =
+                                                    started.elapsed().as_millis() as u64;
+                                            }
+                                            Ok(o) => eprintln!(
+                                                "[moderator] docker update failed for \
+                                                 {container}: {}",
+                                                String::from_utf8_lossy(&o.stderr).trim()
+                                            ),
+                                            Err(e) => eprintln!(
+                                                "[moderator] docker update error for \
+                                                 {container}: {e}"
+                                            ),
+                                        }
                                     }
                                 }
                             }
