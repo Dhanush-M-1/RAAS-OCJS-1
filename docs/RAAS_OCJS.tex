@@ -71,7 +71,7 @@ indumathy.p@eec.srmrmp.edu.in}
 \maketitle
 
 \begin{abstract}
-Online Code Judge (OJ) systems often assign every submission a fixed worst-case resource limit, such as 2048~MiB of RAM and 2.0 CPU cores. We deployed our judge on Google Cloud Platform (an \texttt{e2-standard-4} instance in \texttt{asia-south1}) and measured 399 accepted submissions executing at the 256~MiB tier: 96.2\% used less than 25~MiB of resident set size (RSS), with a median of 5.7~MiB, and every submission completed inside Tier~1 without requiring promotion. We present RAAS-OCJS, a resource-aware scheduling framework that combines Linux cgroups~v2 with tiered allocation and AST-based XGBoost routing. Kernel-level profiles across C++, Python, Java, and C programs, spanning light, medium, and memory-heavy submissions, were used to drive a 10,000-submission contest simulation. Compared with static allocation, watermark-driven reactive promotion reduced reserved RAM by 81.49\% and CPU core-hours by 47.93\%, while allocating independent Tier~2 capacity on prediction alone reached only 27.85\%, because it charges predicted-heavy submissions at the worst-case ceiling rather than discovering actual need. In a simulated 500-submission freeze rush, queue wait fell from 73,134.0~ms to zero and burst drain time from 182.6~s to 34.0~s, while P95 turnaround fell from 144,649.9~ms to 4,491.7~ms. A 19-case promotion stress suite confirms the mechanism directly: submissions demanding 400~MiB exceed the 256~MiB tier in both Python and C++ with zero kernel OOM kills, and the watermark triggers exactly at its configured 179.2~MiB threshold. A 128~MiB boundary experiment additionally isolates three independent failure modes, which together establish 256~MiB as the practical minimum tier. These results support adaptive resource allocation for improving judge-system utilization and concurrency.
+Online Code Judge (OJ) systems often assign every submission a fixed worst-case resource limit, such as 2048~MiB of RAM and 2.0 CPU cores. We deployed our judge on Google Cloud Platform (an \texttt{e2-standard-4} instance in \texttt{asia-south1}) and measured 399 accepted submissions executing at the 256~MiB tier: 96.2\% used less than 25~MiB of resident set size (RSS), with a median of 5.7~MiB, and every submission completed inside Tier~1 without requiring promotion. We present RAAS-OCJS, a resource-aware scheduling framework that combines Linux cgroups~v2 with tiered allocation and AST-based XGBoost routing. Driving the 10,000-submission contest simulation required a combined corpus: the 399 cloud-measured profiles (C++, Python, and Java) together with four-language bare-metal calibration profiles (adding C), the latter supplying the memory-heavy tail that the cloud corpus lacks. Compared with static allocation, watermark-driven reactive promotion reduced reserved RAM by 81.49\% and CPU core-hours by 47.93\%, while allocating independent Tier~2 capacity on prediction alone reached only 27.85\%, because it charges predicted-heavy submissions at the worst-case ceiling rather than discovering actual need. In a simulated 500-submission freeze rush, queue wait fell from 73,134.0~ms to zero and burst drain time from 182.6~s to 34.0~s, while P95 turnaround fell from 144,649.9~ms to 4,491.7~ms. A 19-case promotion stress suite confirms the mechanism directly: submissions demanding 400~MiB exceed the 256~MiB tier in both Python and C++ with zero kernel OOM kills, and the watermark triggers exactly at its configured 179.2~MiB threshold. A 128~MiB boundary experiment additionally isolates three independent failure modes, which together establish 256~MiB as the practical minimum tier. These results support adaptive resource allocation for improving judge-system utilization and concurrency.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -93,7 +93,7 @@ This convention creates three practical problems:
 To address this, this paper presents \textbf{RAAS-OCJS} (Resource-Aware Adaptive Scheduling for Online Contest Judge Systems), which introduces a two-tier execution framework:
 \begin{enumerate}
     \item A lightweight default sandbox (\textbf{Tier 1: 256~MiB RAM, 1.0 CPU core}) that completed all 399 measured submissions on our cloud deployment without a single promotion;
-    \item An active Linux cgroup~v2 soft watermark ($\theta = 70\%$, corresponding to 179.2~MiB) that detects high memory utilization in-flight and lifts the container's memory and CPU limits to \emph{uncapped} mid-execution, without restarting the container or losing process state. Measured from submission acceptance to completed promotion this takes 610--913~ms when the workload reaches the watermark immediately, and 3.2--5.0~s when it ramps gradually, since the interval necessarily includes the time taken to reach the watermark (Section~\ref{sec:promotion_verify});
+    \item An active Linux cgroup~v2 soft watermark ($\theta = 70\%$, corresponding to 179.2~MiB) that detects high memory utilization in-flight and lifts the container's memory limit to \emph{uncapped} mid-execution, without restarting the container or losing process state. CPU is deliberately left at the Tier~1 quota: promotion is memory-only, and CPU-based promotion is a documented follow-up. Measured from submission acceptance to completed promotion this takes 610--913~ms when the workload reaches the watermark immediately, and 3.2--5.0~s when it ramps gradually, since the interval necessarily includes the time taken to reach the watermark (Section~\ref{sec:promotion_verify});
     \item An offline Machine Learning (XGBoost) classifier driven by Tree-sitter Abstract Syntax Tree (AST) static structural metrics that predicts memory-intensive jobs upon ingress.
 \end{enumerate}
 
@@ -134,13 +134,13 @@ During a freeze rush spike of 500 submissions in 30~s ($\lambda = 16.67$~submiss
 RAAS-OCJS implements a two-tier scheduling policy:
 \begin{itemize}
     \item \textbf{Tier 1 (Light Sandbox)}: $R_{\mathrm{light}} = 256$~MiB, 1.0 CPU core (1024 CFS shares).
-    \item \textbf{Tier 2 (High Sandbox)}: unbounded, 2.0 CPU cores (2048 CFS shares). The 2048~MiB figure is the \emph{static baseline's} convention that we compare against, not a ceiling RAAS-OCJS re-imposes after promotion.
+    \item \textbf{Tier 2 (High Sandbox)}: memory unbounded, 2.0 CPU cores (2048 CFS shares). This is the tier a submission is \emph{placed} in directly when the classifier predicts it memory-heavy. A Tier~2 \emph{placement} and mid-execution \emph{promotion} are deliberately different ceilings and must not be conflated: a placement allocates 2.0 cores, whereas promotion raises only the memory limit and leaves CPU at the Tier~1 quota. The 2048~MiB figure is the \emph{static baseline's} convention that we compare against, not a ceiling RAAS-OCJS re-imposes after promotion.
 \end{itemize}
 Rather than statically placing containers into Tier 2, all submissions enter Tier 1 by default. The judge daemon configures the Linux cgroups v2 controller with a soft memory watermark threshold $\theta = 0.70$:
 \begin{equation}
 \mathrm{Threshold}_{\mathrm{wm}} = \theta \times R_{\mathrm{light}} = 0.70 \times 256\text{ MiB} = 179.2\text{ MiB}
 \end{equation}
-When $R_{\mathrm{current}}(t) \ge \mathrm{Threshold}_{\mathrm{wm}}$, the kernel emits a pressure notification. The judge daemon then lifts the limits in parallel with process execution by writing \texttt{max} to the container's cgroup~v2 \texttt{memory.high} and \texttt{memory.max} files, raising both the memory ceiling and the CPU quota to uncapped without restarting the container. The kernel write is the entire promotion: it takes effect immediately and preserves process state. (An earlier implementation instead followed the cgroup write with \texttt{docker update -{}-memory 0 -{}-cpus 0}; that call is silently self-defeating, and Section~\ref{sec:promotion_verify} documents both the failure and its correction.) This leaves a 76.8~MiB safety cushion ($256 - 179.2$) so the update can complete before an OOM condition occurs. Promotion targets \emph{uncapped} rather than a fixed 2048~MiB tier: the watermark fires precisely when a submission has already shown that it outgrows Tier~1, and in our stress suite such submissions demanded 185~MB to 900~MB, so no single fixed ceiling is appropriate.
+When $R_{\mathrm{current}}(t) \ge \mathrm{Threshold}_{\mathrm{wm}}$, the kernel emits a pressure notification. The judge daemon then lifts the limits in parallel with process execution by writing \texttt{max} to the container's cgroup~v2 \texttt{memory.high} and \texttt{memory.max} files, raising the memory ceiling to uncapped without restarting the container. Promotion is deliberately memory-only: CPU stays at the Tier~1 quota. The kernel write is the entire promotion: it takes effect immediately and preserves process state. (An earlier implementation instead followed the cgroup write with \texttt{docker update -{}-memory 0 -{}-cpus 0}; that call is silently self-defeating, and Section~\ref{sec:promotion_verify} documents both the failure and its correction.) This leaves a 76.8~MiB safety cushion ($256 - 179.2$) so the update can complete before an OOM condition occurs. Promotion targets \emph{uncapped} rather than a fixed 2048~MiB tier: the watermark fires precisely when a submission has already shown that it outgrows Tier~1, and in our stress suite such submissions demanded 185~MB to 900~MB, so no single fixed ceiling is appropriate.
 
 % System architecture overview
 \begin{figure*}[!t]
@@ -162,12 +162,12 @@ When $R_{\mathrm{current}}(t) \ge \mathrm{Threshold}_{\mathrm{wm}}$, the kernel 
 
 % Initial resource tiers.
 \node[block, below left=13mm and 8mm of model] (light) {\textbf{Tier 1 -- Light}\\256 MiB / 1 CPU core\\$memory.max=256$ MiB\\$memory.high=179.2$ MiB\\(70\% soft watermark)};
-\node[block, below right=13mm and 8mm of model] (heavy) {\textbf{Tier 2 -- High}\\uncapped / 2 CPU cores\\Expanded limit for memory-intensive jobs};
+\node[block, below right=13mm and 8mm of model] (heavy) {\textbf{Tier 2 -- High}\\memory uncapped / 2 CPU cores\\Direct placement for predicted-heavy jobs};
 
 % Reactive Tier 1 path.
 \node[smallblock, below=10mm of light] (monitor) {cgroup v2 Monitoring\\Soft-watermark notification};
 \node[decision, below=9mm of monitor] (decision) {$R_{current} \ge 179.2$ MiB?};
-\node[smallblock, below left=8mm and 8mm of decision] (promote) {Live Promotion\\Lift limits to uncapped\\without restarting the process};
+\node[smallblock, below left=8mm and 8mm of decision] (promote) {Live Promotion\\Lift memory limit to uncapped\\without restarting the process};
 \node[smallblock, below right=8mm and 8mm of decision] (continue) {Continue in Tier 1};
 
 % Final measurement stage centered beneath both branches.
@@ -241,7 +241,7 @@ Java & 112 & 93.8\% & 19.3 MB & 19.6 MB & 36.8 MB \\
 
 
 \subsection{AST Feature Extraction and XGBoost Predictive Tiering}
-Before launching an execution container, RAAS-OCJS can optionally run a static code analysis pass to predict whether an incoming submission fits safely within Tier~1 (256~MiB) or should be provisioned directly with Tier~2 (uncapped). This predictive stage couples a Tree-sitter Abstract Syntax Tree (AST) feature extractor with in-process XGBoost classifiers \cite{chen2016xgboost}.
+Before launching an execution container, RAAS-OCJS can optionally run a static code analysis pass to predict whether an incoming submission fits safely within Tier~1 (256~MiB) or should be provisioned directly with Tier~2 (memory uncapped, 2.0 cores). This predictive stage couples a Tree-sitter Abstract Syntax Tree (AST) feature extractor with in-process XGBoost classifiers \cite{chen2016xgboost}.
 
 \textit{1) Static AST Feature Extraction:} Using language-specific Tree-sitter grammars compiled directly into our Rust daemon, the extractor parses source code into a concrete syntax tree in under 1.5~ms. In a single linear traversal of the tree, it computes 26 structural metrics:
 \begin{itemize}
@@ -443,7 +443,7 @@ Every saving above depends on promotion actually working, so we tested that dire
 
 The trigger boundary is exact. A 170~MiB submission is \emph{not} promoted (peak 172.4~MiB, below the watermark) while a 185~MiB submission is (peak 188.7~MiB). Submissions of 80~MiB and below never promote and complete normally inside Tier~1.
 
-Promotion restores uncapped execution. Submissions demanding 400~MiB complete with \texttt{AC} at peaks of 401.7--405.2~MiB across Python and C++ and in both allocation styles, and a 900~MiB submission reaches 629.3~MiB before meeting the wall-clock guard (\texttt{TLE}) --- that is, it becomes time-bound rather than memory-bound. Host kernel counters over the run confirm this independently: across all 19 cases the \texttt{system.slice} cgroup recorded \textbf{zero} \texttt{oom\_kill} events and \textbf{zero} allocation attempts blocked at the memory ceiling.
+Promotion restores uncapped memory: the container grows past the tier without a restart, while its CPU quota is unchanged. Submissions demanding 400~MiB complete with \texttt{AC} at peaks of 401.7--405.2~MiB across Python and C++ and in both allocation styles, and a 900~MiB submission reaches 629.3~MiB before meeting the wall-clock guard (\texttt{TLE}) --- that is, it becomes time-bound rather than memory-bound. Host kernel counters over the run confirm this independently: across all 19 cases the \texttt{system.slice} cgroup recorded \textbf{zero} \texttt{oom\_kill} events and \textbf{zero} allocation attempts blocked at the memory ceiling.
 
 The suite also surfaced a defect in our own implementation that we report because it is a trap for anyone building this mechanism. The promotion path originally lifted the limits through the cgroup and then called \texttt{docker update <ctr> -{}-memory 0 -{}-memory-swap -1}, intending to uncap the container. For \texttt{docker update}, however, \texttt{-{}-memory 0} does \emph{not} mean ``unlimited'': Docker reads \texttt{0} as ``no change'' and re-reconciles the container's cgroup against its configured limit, restoring the 256~MiB cap one line after it was lifted. Measured on the host, \texttt{memory.max} went \texttt{max} $\rightarrow$ \texttt{268435456} across those two calls. The consequence was that submissions exceeding the tier died at the \emph{old} ceiling while still reporting \texttt{tier\_promoted}, and the run recorded five \texttt{oom\_kill} events. Removing the redundant \texttt{docker update} (the cgroup write is the whole promotion) reduced kills to zero. We note this because the failure is silent and, as we found, survives any check whose workload stays below the tier.
 
@@ -451,7 +451,7 @@ Two runtime interactions qualify the results and should be kept in view when rea
 
 \section{Cloud Deployment and Provisioning}
 \label{sec:cloud}
-We deployed the judge on Google Cloud Platform as a single \texttt{e2-standard-4} instance (4 vCPUs, 16~GB RAM) in \texttt{asia-south1} (Mumbai), running as a systemd service inside a dedicated VPC whose only ingress rules admit Google's Identity-Aware Proxy range; the submission API is never reachable from the public internet, and every request carries a shared-secret header. This deployment replaces the AWS \texttt{c6i.4xlarge} projection of earlier drafts: the figures below are measured on the same instance that graded every submission in Section~IV, not extrapolated.
+We deployed the judge on Google Cloud Platform as a single \texttt{e2-standard-4} instance (4 vCPUs, 16~GB RAM) in \texttt{asia-south1} (Mumbai), running as a systemd service inside a dedicated VPC whose only ingress rules admit Google's Identity-Aware Proxy range; the submission API is never reachable from the public internet, and every request carries a shared-secret header. This deployment replaces the AWS \texttt{c6i.4xlarge} projection of earlier drafts: the figures below are measured on the instance that graded the 399-submission cloud corpus reported in Section~IV-A, not extrapolated. The 72-run bare-metal calibration described in the same subsection was run on the physical testbed of Section~III, not on this instance.
 
 Cloud judges using a Horizontal Pod Autoscaler can face 60--180~s cold-start lag while new VMs spin up and pull images. All values in Table~\ref{tab:cloud} derive from the shipped tier, the instance size, and the on-demand hourly price, assuming the same 14~GiB usable host budget as Table~\ref{tab:burst_stress}.
 
@@ -468,7 +468,7 @@ Per-Pod Memory & 2048 MiB & 256 MiB & \textbf{8.0$\times$} \\
 \hline
 Per-Pod CPU & 2.0 vCPU & 1.0 vCPU & 2.0$\times$ \\
 \hline
-Pods per VM & 7 & 56 & \textbf{8.0$\times$} \\
+Pods per VM (memory-bound) & 7 & 56 & \textbf{8.0$\times$} \\
 \hline
 VMs for 500-Sub Burst & 72 & 9 & \textbf{87.5\% fewer} \\
 \hline
@@ -479,7 +479,7 @@ Cluster Hourly Cost & USD 11.59 & USD 1.45 & \textbf{USD 10.14} \\
 \end{tabularx}
 \end{table}
 
-The hourly saving is \textbf{USD~10.14}, an 87.5\% reduction in cluster cost.
+The hourly saving is \textbf{USD~10.14}, an 87.5\% reduction in cluster cost. Note that \emph{pods per VM} is a memory-reservation figure, not a core count: 56 is $\lfloor 14{,}336 / 256 \rfloor$, the number of 256~MiB reservations that fit the 14~GiB usable budget. The \texttt{e2-standard-4} provides 4 vCPUs, so 56 concurrent pods share four physical cores at 1.0 vCPU each and are time-sliced by the CFS scheduler; the tier bounds memory occupancy, not CPU throughput, and a memory-bound pod count therefore exceeds the core count by design.
 
 \section{Boundary Stress Analysis and Future Scopes}
 

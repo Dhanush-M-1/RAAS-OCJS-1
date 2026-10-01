@@ -1,3 +1,12 @@
+> **STATUS: RESOLVED (2026-10-01).** The open discrepancy this document tracks is closed.
+> The 87.5% / 0-promotion and 47.22% / 2,032-promotion figures both came from corpora that
+> no longer match the harness. The authoritative current result on the combined corpus is
+> **3,702.25 GB reserved, 81.49% saved, 687 promotions (6.87%)**; the cloud-only corpus gives
+> 87.4% with zero promotions because it contains no memory-heavy submissions. A promotion
+> defect found by the stress suite (a redundant `docker update --memory 0` silently reverting
+> the cgroup promotion) has been fixed in `server/src/docker.rs`. Historical analysis below is
+> retained as the record of the investigation, not as current results.
+
 # RAAS-OCJS on Google Cloud Platform — Deployment Plan and Technical Review
 
 **Purpose.** A deployment-architect review answering: *given this exact repository and its current
@@ -907,10 +916,9 @@ still labelled analytically derived. Do not launder GCP measurements into AWS do
    repo, and the Java rows were produced under a heap configuration the shipped code no longer uses
    ([`docs/FINAL_RESULTS.md`](FINAL_RESULTS.md:59) vs [`server/src/docker.rs`](../server/src/docker.rs:174)).
    Any cloud run will produce Java-RHS numbers that contradict that table unless the table is regenerated.
-10. **The 87.5% vs 47.22% discrepancy survives.** A cloud run executing the pure corpus will produce yet
-    another 0-promotion, ~87.5%-style artifact; it will not resolve why the conference report cites
-    47.22% with 2,032 promotions ([`docs/EXPERIMENTAL_RESULTS.md`](EXPERIMENTAL_RESULTS.md:170)).
-    Resolving that is a separate, prior task — and if the paper cites the report's numbers, a reviewer
+10. ~~**The 87.5% vs 47.22% discrepancy survives.**~~ **RESOLVED 2026-10-01.** Both figures came from
+    superseded corpora. See the banner at the top of this document; the current authoritative result is
+    81.49% / 687 promotions on the combined corpus. The original concern was sound — and if the paper cites the report's numbers, a reviewer
     re-running your artifact will get the CSV's numbers, not the report's.
 11. **Environment drift.** Alpine/Temurin/JDK/Docker/kernel versions are all mutable tags; the measurement
     is a snapshot, not a pinned artifact, unless you record image digests and package versions (§8.6).

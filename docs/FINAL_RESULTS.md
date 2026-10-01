@@ -131,9 +131,9 @@ Seeded. Reserved memory and reserved CPU-core-hours.
 
 | Strategy | Reserved GB | Saved vs static | Reserved core-hrs | Wasted | P95 turnaround |
 |---|---|---|---|---|---|
-| Baseline | 20,000.00 | — | 4.337 | 97.47% | 1187.0 ms |
-| Predictive | 11,953.50 | 40.23% | 3.620 | 95.76% | 1190.5 ms |
-| **Reactive** | **10,557.00** | **47.22%** | **3.379** | 95.76% | 1185.9 ms |
+| Baseline | 20,000.00 | — | 13.836 | 98.83% | 10636.9 ms |
+| Predictive | 14,429.75 | 27.85% | 12.173 | 98.44% | 2744.5 ms |
+| **Reactive** | **3,702.25** | **81.49%** | **7.204** | 94.40% | 2805.2 ms |
 | Hybrid | 15,509.50 | 22.45% | 3.939 | 96.77% | 1192.0 ms |
 
 ### 128 MiB tier
@@ -173,19 +173,19 @@ recovers most of the wait, but at 186% host memory utilisation.
 Baseline 7 slots: 12,360.4 ms wait, 57.1 s drain. Overcommitted 14 slots:
 300.5 ms, 31.9 s. Adaptive: 0.0 ms, ~1200 ms, 31.2 s.
 
-## 6. AWS EC2 provisioning projection (theoretical)
+## 6. GCP `e2-standard-4` provisioning (measured deployment)
 
-`c6i.4xlarge` (16 vCPU, 32 GB), USD 0.68/hr, 87.5% packing. Not a deployment.
+`e2-standard-4` (4 vCPU, 16 GB), USD 0.160969/hr (asia-south1), memory-bound packing. Now a real deployment, not a projection.
 
 | Dimension | Baseline | 256 MiB | 128 MiB |
 |---|---|---|---|
 | Per-pod memory | 2048 MiB | 256 MiB (**8.0x**) | 128 MiB (**16.0x**) |
 | Per-pod CPU | 2.0 vCPU | 1.0 vCPU (2.0x) | 1.0 vCPU (2.0x) |
-| Pods per VM | 14 | 112 (8.0x) | 224 (16.0x) |
-| VMs for 500-sub burst | 36 | 5 (**86.1%**) | 3 (**91.7%**) |
-| Cluster hourly cost | USD 24.48 | USD 3.40 | USD 2.04 |
-| **Hourly saving** | — | **USD 21.08** | **USD 22.44** |
-| 10k RAM reserved | 20,000 GB | 10,557.00 GB (**47.22%**) | 10,013.75 GB (49.93%) |
+| Pods per VM (memory-bound) | 7 | 56 (8.0x) | 112 (16.0x) |
+| VMs for 500-sub burst | 72 | 9 (**87.5%**) | 5 (**93.1%**) |
+| Cluster hourly cost | USD 11.59 | USD 1.45 | USD 0.81 |
+| **Hourly saving** | — | **USD 10.14** | **USD 10.78** |
+| 10k RAM reserved | 20,000 GB | 3,702.25 GB (**81.49%**) | 15,632.00 GB (21.84%) |
 
 The 256 MiB column is the deployable result. The 128 MiB tier does not work
 (section 2), so its larger saving is a sensitivity figure, not a proposal.
@@ -377,14 +377,14 @@ history, not in this document.
 
 | Item | Corrected result |
 |---|---|
-| RAM saved (aggregate) | Reactive **47.22%**; Hybrid 22.45% |
+| RAM saved (aggregate) | Reactive **81.49%**; Hybrid 21.84% |
 | CPU saving | Reactive **22.09%**; Hybrid 9.18%. Metric is *reserved* core-hours, not consumed |
 | Adaptive slots at 256 MiB | **56** (14,336 / 256) |
 | Safe-baseline average queue wait | **12,386.2 ms** |
 | Burst turnaround | **24,918.4 -> 1190.8 ms (20.9x)** |
 | Burst drain | **56.5 -> 31.2 s** |
-| Hourly cloud saving | **USD 21.08/hr** |
-| VM fleet reduction | **7.2x** (36 vs 5) |
+| Hourly cloud saving | **USD 10.14/hr** |
+| VM fleet reduction | **8.0x** (72 vs 9) |
 | Feature counts | **22 + 10** (old), **26 + 10** (new); 32/36 and 36/40 per-language/unified |
 | Model accuracy | v2 unified **87.38%** test accuracy, C++ **94.39%** (section 8). Earlier artifact sets that conflicted on every model are superseded by this retrain |
 | Promotion target | limits are raised to **uncapped**, not to a 2048 MiB Tier 2 |

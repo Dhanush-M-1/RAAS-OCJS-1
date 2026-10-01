@@ -119,7 +119,7 @@ Live promotions were 0 for all four strategies. Slots are derived, never hardcod
 
 **Burst stress** (N = 500, 30 s window, 15 GiB host): Baseline (safe, 7 slots) avg queue wait 20966.9 ms, P95 turnaround 41794.6 ms, drain 73.8 s, util 93.3%. Baseline overcommitted (14 slots) wait 2996.0 ms, P95 7401.6 ms, drain 37.7 s, util 186.7%. Predictive (56 slots) wait 0.0, P95 1421.8 ms, drain 31.3 s. Reactive wait 0.0, P95 1482.8 ms, drain 31.2 s. Hybrid wait 0.0, P95 1394.5 ms, drain 31.3 s.
 
-**Cloud projection**: per-pod memory 2048 → 256 MiB (8.0x); CPU 2.0 → 1.0 vCPU (2.0x); density on c6i.4xlarge (32 GB) 14 → 112 pods (8.0x); 500-sub burst fleet 36 → 5 VMs (86.1%); cost at USD 0.68/hr 24.48 → 3.40 USD/hr (21.08 saved, 86.1%); reserved RAM over 10,000 submissions 20000.0 → 2500.0 GB (87.5%).
+**Cloud projection**: per-pod memory 2048 → 256 MiB (8.0x); CPU 2.0 → 1.0 vCPU (2.0x); density on e2-standard-4 (Mumbai, 14 GiB usable) 7 → 56 pods (8.0x); 500-sub burst fleet 72 → 9 VMs (87.5%); cost at USD 0.160969/hr 11.59 → 1.45 USD/hr (10.14 saved, 87.5%); reserved RAM over 10,000 submissions 20,000.0 → 3,702.25 GB (81.49%).
 
 **Per-language** (Baseline → Reactive, shares among the simulated submissions):
 

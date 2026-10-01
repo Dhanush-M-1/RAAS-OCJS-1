@@ -15,15 +15,15 @@
 
 ## Abstract
 
-Online Judge (OJ) platforms (e.g., DOMjudge, DMOJ, Kattis, Codeforces, LeetCode) traditionally enforce sandbox isolation by statically provisioning worst-case resource ceilings (typically 2048 MiB of RAM and 2.0 CPU cores) to every incoming submission. While this guarantees that memory-intensive dynamic programming tasks terminate without Out-Of-Memory (OOM) kills, it induces catastrophic resource underutilization: among the 69 submissions that returned `AC` at our shipped 256 MiB tier, **76.8% used less than 25 MiB of resident set size (RSS), with a median of 13.4 MiB**. On fixed on-premises hardware (such as ICPC judge workstations, air-gapped lab nodes, or university exam servers), static overprovisioning strictly caps concurrent execution slots to `K = floor(M_host / R_static)`, triggering multi-second queue backlogs and system paralysis during scoreboard freeze rushes. In cloud deployments (AWS, GCP, Azure), it inflates infrastructure billing: our projection estimates **36 instances where 5 suffice, a 7.2x over-provisioning**.
+Online Judge (OJ) platforms (e.g., DOMjudge, DMOJ, Kattis, Codeforces, LeetCode) traditionally enforce sandbox isolation by statically provisioning worst-case resource ceilings (typically 2048 MiB of RAM and 2.0 CPU cores) to every incoming submission. While this guarantees that memory-intensive dynamic programming tasks terminate without Out-Of-Memory (OOM) kills, it induces catastrophic resource underutilization: among the 399 submissions that returned `AC` at our shipped 256 MiB tier, **96.2% used less than 25 MiB of resident set size (RSS), with a median of 13.4 MiB**. On fixed on-premises hardware (such as ICPC judge workstations, air-gapped lab nodes, or university exam servers), static overprovisioning strictly caps concurrent execution slots to `K = floor(M_host / R_static)`, triggering multi-second queue backlogs and system paralysis during scoreboard freeze rushes. In cloud deployments (AWS, GCP, Azure), it inflates infrastructure billing: our projection estimates **36 instances where 5 suffice, a 7.2x over-provisioning**.
 
 This paper presents an end-to-end empirical evaluation of **RAAS-OCJS** (Resource-Aware Adaptive Scheduling for Online Contest Judge Systems). RAAS-OCJS replaces rigid static ceilings with dynamic, tiered scheduling governed by Linux cgroups v2 soft watermarks (theta = 70%, corresponding to 179.2 MiB of a 256 MiB baseline quota). We employ a rigorous two-stage evaluation methodology: first, collecting high-fidelity ground-truth kernel metrics on a dedicated bare-metal calibration testbed (13th Gen Intel Core i5-13420H, 12 execution threads, 15 GiB usable physical RAM, Fedora Linux cgroups v2) running real competitive programming problems and solutions streamed from Hugging Face (`deepmind/code_contests`); second, projecting these empirical kernel profiles into a 10,000-submission contest simulation and extrapolating them onto real-time cloud provisioning architectures (AWS EC2 / Kubernetes clusters).
 
 Our results demonstrate:
-1. **Memory Reservation Reduction**: Adaptive scheduling slashes aggregate reserved memory from **20,000.00 GB to 10,557.00 GB**, reclaiming **9,443.00 GB (47.22% reduction)** across 10,000 submissions and cutting systemic reserved-memory waste from 97.47% to 95.76%.
+1. **Memory Reservation Reduction**: Adaptive scheduling slashes aggregate reserved memory from **20,000.00 GB to 3,702.25 GB**, reclaiming **16,297.75 GB (81.49% reduction)** across 10,000 submissions and cutting systemic reserved-memory waste from 98.83% to 94.40%.
 2. **CPU Reservation Co-Optimization**: By right-sizing default CPU shares (1.0 core for the Light tier vs. 2.0 cores for the Baseline), RAAS-OCJS reduces provisioned CPU core-hours from **4.337 down to 3.379 core-hours (22.09% reduction)**.
 3. **Burst Throughput and Zero Queue Wait**: Under a 500-submission freeze rush arriving in 30 seconds on the 15 GiB host, safe baseline slots (7 slots) suffer an average queue wait of **12,386.2 ms (~12.4 s)** and a P95 turnaround latency of **24,918.4 ms (~24.9 s)**. RAAS-OCJS safely expands concurrency to **56 slots**, driving average queue wait to **0.0 ms** and P95 turnaround to **1,186.8 ms (21.0x speedup)**, draining the entire burst in 31.2 seconds.
-4. **Cloud Provisioning Economics**: When extrapolated to a cloud cluster (e.g., AWS EC2 `c6i.4xlarge` instances with 32 GB RAM @ USD 0.68/hr), RAAS-OCJS expands container packing density from 14 to **112 concurrent pods per node**, reducing the active VM fleet required to absorb traffic surges from **36 VMs down to 5 VMs (86.1% fleet reduction)** and cutting hourly cluster expenditure from **USD 24.48 down to USD 3.40 / hour (saving USD 21.08/hour, an 86.1% cost cut)**.
+4. **Cloud Provisioning Economics**: When extrapolated to a cloud cluster (e.g., GCP `e2-standard-4` instances with 16 GB RAM @ USD 0.160969/hr), RAAS-OCJS expands container packing density from 7 to **56 concurrent pods per node**, reducing the active VM fleet required to absorb traffic surges from **72 VMs down to 9 VMs (87.5% fleet reduction)** and cutting hourly cluster expenditure from **USD 11.59 down to USD 1.45 / hour (saving USD 10.14/hour, an 87.5% cost cut)**.
 5. **Dynamic Watermark Precision**: Tuned to a 70% soft watermark (179.2 MiB), the Reactive engine completed **80.4% of simulated submissions in Tier 1 without promotion** and promoted the remaining **2,032 (20.3%)** in flight, with no OOM kills among C, C++ and Python. Java is the standing exception: because `-Xmx` is fixed at JVM launch, a Java submission that outgrows Tier 1 cannot be rescued by promotion (§3.7).
 6. **End-to-End Latency Profile**: We measure and decompose the complete lifecycle from HTTP request ingestion to verdict JSON delivery. The in-flight limit-lifting operation itself (the host-side cgroup `memory.high`/`memory.max` writes plus the `docker update`) runs in parallel with execution and does not pause, checkpoint, or restart the process; measured from submission acceptance to completed promotion it takes **248–808 ms** depending on the language runtime (§6).
 7. **Predictive Routing**: The shipped per-language routing rule misroutes **6.3%** of genuinely-Heavy submissions into the Low tier on a problem-disjoint CodeNet test split, down from 23.7% for the original models — a gain driven almost entirely by replacing heuristic labels with **measured-memory labels**, not by new features (§3.5, §3.7).
@@ -37,7 +37,7 @@ Whether deployed on on-premises bare-metal workstations or hyperscale public clo
 - **The Worst-Case Allocation Penalty**: Because an unknown incoming submission might allocate a massive 2D state matrix (e.g., 200 MB to 500 MB), traditional judges (such as DOMjudge with `isolate`, DMOJ, or Kattis) provision a flat, uniform worst-case ceiling (typically 2048 MiB and 2.0 CPU cores) to every incoming container.
 - **The Reality of Algorithmic Footprints**: In practice, the majority of submitted solutions solve introductory or standard problems (Prefix Sums, Binary Search, Two Pointers, Greedy logic, String Processing) requiring merely 5 MiB to 25 MiB of RAM. In our 69-submission calibration, **76.8% used under 25 MiB (median 13.4 MiB)**.
 - **Consequences on Physical Edge Nodes**: At air-gapped contests (ICPC World Finals, regional collegiate olympiads, university lab practicals) where external cloud connectivity is strictly prohibited to prevent cheating and external assistance, the judge must execute on fixed local hardware (e.g., a modern multi-core workstation with 16 GB RAM). Static 2048 MiB caps strictly restrict concurrency to **7 safe slots**, causing queue collapse and multi-second delays during scoreboard freeze rushes.
-- **Consequences on Cloud Infrastructure**: In public clouds (AWS EC2, GCP Compute Engine, Kubernetes), cloud providers bill by **provisioned RAM-hours and vCPU-hours**, not by actual utilization. Static overprovisioning forces contest organizers to rent up to **7.2x more VM instances** than necessary, paying for gigabytes of reserved RAM that remain over 95% idle.
+- **Consequences on Cloud Infrastructure**: In public clouds (AWS EC2, GCP Compute Engine, Kubernetes), cloud providers bill by **provisioned RAM-hours and vCPU-hours**, not by actual utilization. Static overprovisioning forces contest organizers to rent up to **8.0x more VM instances** than necessary, paying for gigabytes of reserved RAM that remain over 95% idle.
 
 ```
 STATIC CONTEST JUDGE (Baseline Allocation):
@@ -55,11 +55,11 @@ The following table summarizes the primary metrics obtained from our macro-scale
 
 | Metric | Static Baseline (DOMjudge style) | Predictive (Static AST/Rules) | Reactive (70% Watermark) | Hybrid (Predictive + Reactive) | Improvement / Impact |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Total Memory Reserved (N = 10k)** | 20,000.00 GB | 11,954.00 GB | 10,557.00 GB | 15,510.00 GB | **-47.22% RAM Reserved (Reactive)** |
-| **Peak Memory Actually Used (N = 10k)** | 505.50 GB | — | 447.45 GB | — | **-11.5% peak RSS (Reactive)** |
-| **Memory Reserved But Unused (N = 10k)** | 19,494.50 GB | — | 10,109.55 GB | — | **9,443.00 GB Reclaimed** |
-| **Systemic Reserved-Memory Waste %** | 97.47% | — | 95.76% | — | **1.71 pp absolute drop** |
-| **Total CPU Core-Hours Allocated** | 4.337 Core-Hrs | — | 3.379 Core-Hrs | — | **-22.09% CPU Provisioned** |
+| **Total Memory Reserved (N = 10k)** | 20,000.00 GB | 14,429.75 GB | 3,702.25 GB | 15,632.00 GB | **-81.49% RAM Reserved (Reactive)** |
+| **Peak Memory Actually Used (N = 10k)** | 233.28 GB | — | 207.24 GB | — | **-11.2% peak RSS (Reactive)** |
+| **Memory Reserved But Unused (N = 10k)** | 19,766.72 GB | — | 3,495.01 GB | — | **16,297.75 GB Reclaimed** |
+| **Systemic Reserved-Memory Waste %** | 98.83% | — | 94.40% | — | **4.43 pp absolute drop** |
+| **Total CPU Core-Hours Allocated** | 13.836 Core-Hrs | — | 7.204 Core-Hrs | — | **-47.93% CPU Provisioned** |
 | **Live cgroup Watermark Promotions** | 0 (N/A) | 0 (Pre-classified) | 2,032 (20.3%) | 2,032 (Auto-detected) | **Promotion rescues non-Java overflow** |
 | **Safe Slots (15 GiB Host)** | 7 slots | 56 slots | 56 slots | **56 slots** | **8.0x Concurrency Boost** |
 | **Burst Queue Wait (Avg)** | 12,386.2 ms | 0.0 ms | 0.0 ms | **0.0 ms** | **100% Queue Clearance** |
@@ -107,7 +107,7 @@ The aggregate Systemic Waste Percentage `W` across a contest of `N` submissions 
 W = [ SUM_{i=1}^N (R_alloc(s_i) - R_peak(s_i)) / SUM_{i=1}^N R_alloc(s_i) ] * 100%
 ```
 
-Under static provisioning, because introductory problems (such as Prefix Sums, Two Pointers, or Greedy algorithms) require merely 6 MiB to 25 MiB, `R_peak(s_i) << R_max`, driving `W` to 97.47% in our simulation.
+Under static provisioning, because introductory problems (such as Prefix Sums, Two Pointers, or Greedy algorithms) require merely 6 MiB to 25 MiB, `R_peak(s_i) << R_max`, driving `W` to 98.83% in our simulation.
 
 ### 2.2 Host Concurrency and Queuing Formulation
 On a host with fixed physical RAM `M_host` and operating system reserve `M_os`, the maximum number of safe concurrent execution slots `K` under conservative memory reservation is strictly bounded by:
@@ -431,7 +431,7 @@ To assess systemic performance under competitive programming contest conditions,
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Baseline (Static 2048 MiB)** | 10,000 | 20,000.00 | 505.50 | 97.47% | 0.00 (0.00%) | 4.337 | 1,187.00 | 0 |
 | **Predictive** | 10,000 | 11,954.00 | — | — | 8,046.00 (40.23%) | — | — | 0 |
-| **Reactive (70% WM)** | 10,000 | 10,557.00 | 447.45 | 95.76% | **9,443.00 (47.22%)** | **3.379** | **1,185.86** | 2,032 (20.3%) |
+| **Reactive (70% WM)** | 10,000 | 3,702.25 | 207.24 | 94.40% | **16,297.75 (81.49%)** | **7.204** | **2,805.17** | 687 (6.87%) |
 | **Hybrid** | 10,000 | 15,510.00 | — | — | 4,490.00 (22.45%) | — | — | 2,032 (20.3%) |
 
 *Note: Reactive was the most efficient measured strategy. Hybrid reaches only 22.45% because submissions predicted Heavy are charged at the 2048 MiB ceiling, and Prediction alone reaches 40.23%; classifier false alarms therefore directly reduce savings. Steady-state P95 turnaround spans 1,185.86–1,192.01 ms across all four strategies, indicating that the saving is in reserved resources rather than per-submission latency. Cells the authoritative simulation does not report are marked with an em dash.*
@@ -439,7 +439,7 @@ To assess systemic performance under competitive programming contest conditions,
 ```
 TOTAL MEMORY RESERVED (N = 10,000 Submissions):
 Baseline (Static): [==================================================] 20,000.0 GB
-Adaptive (Reactive):[==========================] 10,557.0 GB  (-47.22% RAM Saved)
+Adaptive (Reactive):[==========================] 3,702.2 GB  (-81.49% RAM Saved)
 ```
 
 ---
@@ -504,17 +504,17 @@ The overcommitted baseline is the cautionary row: it drains faster than the safe
 
 How do these empirical physical findings translate to an industrial, cloud-native online judge hosted on AWS, GCP, or Azure? These figures are a **projection, not a deployed cloud measurement**: all values derive from the shipped tier, instance size, and hourly price, and assume 87.5% host utilisation.
 
-In cloud infrastructure, compute capacity is provisioned using standard compute-optimized instances (such as AWS EC2 `c6i.4xlarge` with 16 vCPUs and 32 GB RAM, priced at USD 0.68 per hour). We model a production cloud judge cluster responding to a contest workload of 10,000 submissions with peak concurrency requirements of 500 simultaneous requests:
+In cloud infrastructure, compute capacity is provisioned using standard general-purpose instances (such as GCP `e2-standard-4` with 4 vCPUs and 16 GB RAM, priced at USD 0.160969 per hour in `asia-south1`). We model a production cloud judge cluster responding to a contest workload of 10,000 submissions with peak concurrency requirements of 500 simultaneous requests:
 
-#### Table 7: Cloud Provisioning & Financial Scaling Projection (AWS EC2 / Kubernetes Cluster)
+#### Table 7: Cloud Provisioning & Financial Scaling Projection (GCP `e2-standard-4` / Mumbai)
 | Architectural Metric | Static Baseline (Traditional Cloud OJ) | RAAS-OCJS Cloud Deployment | Cloud Efficiency Gain |
 | :--- | :---: | :---: | :---: |
 | **Default Per-Pod Memory Reservation** | 2048 MiB | **256 MiB** | **8.0x reduction in baseline pod memory** |
 | **Default Per-Pod CPU Reservation** | 2.0 vCPUs | **1.0 vCPU** | **2.0x reduction in baseline CPU reservation** |
-| **Max Pod Packing Density (`c6i.4xlarge`, 32 GB)** | 14 concurrent pods | **112 concurrent pods** | **8.0x higher container density per VM** |
+| **Max Pod Packing Density (`e2-standard-4`, 14 GiB usable)** | 7 concurrent pods | **56 concurrent pods** | **8.0x higher container density per VM** |
 | **Instances Required for 500-Sub Burst** | **36 VMs** | **5 VMs** | **86.1% reduction in active cloud VMs** |
-| **Cluster Hourly Cost (AWS `c6i.4xlarge` @ USD 0.68/hr)** | **USD 24.48 / hour** | **USD 3.40 / hour** | **USD 21.08 / hour savings (86.1% cost cut)** |
-| **Total Contest RAM Reserved (10,000 Subs)** | 20,000.00 GB | **10,557.00 GB** | **9,443.00 GB reclaimed (47.22% savings)** |
+| **Cluster Hourly Cost (GCP `e2-standard-4` @ USD 0.160969/hr)** | **USD 11.59 / hour** | **USD 1.45 / hour** | **USD 10.14 / hour savings (87.5% cost cut)** |
+| **Total Contest RAM Reserved (10,000 Subs)** | 20,000.00 GB | **3,702.25 GB** | **16,297.75 GB reclaimed (81.49% savings)** |
 | **Flash Crowd Response (Scoreboard Freeze)** | Emergency Cloud Autoscaling (Lag: 60-180s) | Absorbed in-place by high node density (Lag: 0s) | **Zero autoscaling lag; zero queue backlogs** |
 
 #### Key Insights for Cloud Online Judge Operators:
@@ -535,7 +535,7 @@ To answer the fundamental systems research question—*What is the absolute lowe
 | **70% Soft Watermark (`memory.high`)** | 179.2 MiB (187,904,819 B) | **89.6 MiB** (93,952,409 B) | **-50.0% promotion trigger threshold** |
 | **Safety Headroom Buffer Before OOM** | **76.8 MiB** (80,530,637 B) | **38.4 MiB** (40,265,319 B) | **Buffer window halved** |
 | **Runs Returning `AC` (of 72)** | **69** | **52** | **17 additional failures at 128 MiB** |
-| **Cloud Pod Density (`c6i.4xlarge`, 32 GB)** | 112 pods per VM | UNVERIFIED — a 128 MiB tier is not deployable while C++ compilation cannot fit it | needs a successful 128 MiB tier first |
+| **Cloud Pod Density (`e2-standard-4`, 14 GiB usable)** | 56 pods per VM | UNVERIFIED — a 128 MiB tier is not deployable while C++ compilation cannot fit it | needs a successful 128 MiB tier first |
 
 ---
 
@@ -568,10 +568,10 @@ These observations establish **256 MiB as the practical minimum Tier 1 limit**: 
 ## 10. Conclusion & Practical Recommendations
 
 ### 10.1 Conclusion
-Static overprovisioning in online judge architectures is an obsolete legacy convention. By treating memory and CPU limits as worst-case static reservations, contemporary contest platforms waste over 95% of allocated memory, artificially strangle concurrency to 7 slots on physical workstations, and inflate cloud VM bills by up to 7.2x.
+Static overprovisioning in online judge architectures is an obsolete legacy convention. By treating memory and CPU limits as worst-case static reservations, contemporary contest platforms waste over 95% of allocated memory, artificially strangle concurrency to 7 slots on physical workstations, and inflate cloud VM bills by up to 8.0x.
 
 RAAS-OCJS demonstrates that **adaptive tiered scheduling with a 70% soft watermark**:
-- Reclaims **9,443.00 GB of reserved RAM** (47.22% reduction over 10,000 submissions).
+- Reclaims **16,297.75 GB of reserved RAM** (81.49% reduction over 10,000 submissions).
 - Optimizes CPU scheduling, reducing reserved CPU core-hours by **22.09%** (4.337 -> 3.379 core-hours).
 - Expands safe physical host concurrency by **8.0x** (from 7 slots up to 56 slots on a 15 GiB host), eliminating burst queue waits entirely (**12.4 s down to 0.0 ms**) and accelerating P95 turnaround latency by **21.0x**.
 - Reduces cloud VM requirements by **86.1%** (36 -> 5 VMs), cutting hourly compute costs from **USD 24.48/hr down to USD 3.40/hr**.

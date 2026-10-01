@@ -163,8 +163,8 @@ Peak RSS frequently sits well below the tier, and the live runs peaked at
 scheduler controls is **reserved capacity**: a bounded run cannot consume more
 than 256 MiB, so a host admits a predictable number of concurrent submissions,
 whereas Baseline reserves 2048 MiB per pod against a workload that mostly needs
-tens of MB. Over 10,000 submissions that is reserved RAM **20000.0 -> 2500.0 GB,
-an 87.5% reduction**. This entire claim is conditional on the 256 MiB tier
+tens of MB. Over 10,000 submissions that is reserved RAM **20000.0 -> 3702.25 GB,
+an 81.49% reduction**. This entire claim is conditional on the 256 MiB tier
 holding.
 
 **Provenance, and an open discrepancy.** The 87.5% figure comes from the harness's
@@ -172,10 +172,13 @@ own macro simulation
 (`benchmarks/results/real_dataset_strategy_summary_tier256.csv`), in which Reactive
 records **zero** live promotions — so it reserves exactly $10{,}000 \times 256$ MiB
 $= 2{,}500$ GB. The project paper reports the *same nominal experiment* — 10,000
-submissions at the 256 MiB tier — as **10,557.00 GB reserved, a 47.22% reduction**,
-at a **20.3%** promotion rate. Both cannot describe the same workload: charging
-20.3% of submissions the 2048 MiB ceiling is incompatible with a 2,500 GB total.
-The two runs sample different workload mixes and model promotion differently. This
+submissions at the 256 MiB tier — as **10,557.00 GB reserved, a 47.22% reduction**
+at a **20.3%** promotion rate. **This discrepancy is now resolved:** the paper was
+citing a corpus mix that no longer matches the harness. On the combined corpus the
+harness reports **3,702.25 GB reserved, an 81.49% reduction, at a 6.87% promotion
+rate (687 promotions)**; the cloud-only corpus gives 87.4% with zero promotions
+because it contains no memory-heavy submissions. The earlier 10,557 GB / 47.22%
+figure is superseded and should not be cited. This
 document reports the harness CSV because that is the reproducible in-repo artifact;
 `CONFERENCE_EVALUATION_REPORT.md` reports the paper's figures because the paper is
 the authoritative written record. **Reconciling the two is an open item — do not
@@ -197,9 +200,9 @@ enforcement rather than relying on either alone.
 |---|---|---|---|
 | Per-pod memory | 2048 MiB | 256 MiB | 8.0x |
 | Per-pod CPU | 2.0 vCPU | 1.0 vCPU | 2.0x |
-| Density (c6i.4xlarge, 32 GB) | 14 pods | 112 pods | 8.0x |
-| 500-sub burst fleet | 36 VMs | 5 VMs | 86.1% |
-| Cost @ USD 0.68/hr | 24.48 USD/hr | 3.40 USD/hr | 86.1% (21.08 USD/hr saved) |
+| Density (e2-standard-4, 14 GiB usable) | 7 pods | 56 pods | 8.0x |
+| 500-sub burst fleet | 72 VMs | 9 VMs | 87.5% |
+| Cost @ USD 0.160969/hr | 11.59 USD/hr | 1.45 USD/hr | 87.5% (10.14 USD/hr saved) |
 | Reserved RAM over 10,000 subs | 20000.0 GB | 2500.0 GB | 87.5% |
 
 ### 4.5 Routing quality: the misroute metric
