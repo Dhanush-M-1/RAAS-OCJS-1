@@ -71,7 +71,7 @@ indumathy.p@eec.srmrmp.edu.in}
 \maketitle
 
 \begin{abstract}
-Online Code Judge (OJ) systems often assign every submission a fixed worst-case resource limit, such as 2048~MiB of RAM and 2.0 CPU cores. We deployed our judge on Google Cloud Platform (an \texttt{e2-standard-4} instance in \texttt{asia-south1}) and measured 399 accepted submissions executing at the 256~MiB tier: 96.2\% used less than 25~MiB of resident set size (RSS), with a median of 5.7~MiB, and every submission completed inside Tier~1 without requiring promotion. We present RAAS-OCJS, a resource-aware scheduling framework that combines Linux cgroups~v2 with tiered allocation and AST-based XGBoost routing. Kernel-level profiles from C++, Python, Java, and C programs were used to drive a 10,000-submission contest simulation. Compared with static allocation, watermark-driven reactive promotion reduced reserved RAM by 87.50\% and CPU core-hours by 48.68\%; classifier-driven routing alone reached 19.84\%, because it charges predicted-heavy submissions at the worst-case ceiling rather than discovering actual need. In a simulated 500-submission freeze rush, queue wait decreased from 92,712.8~ms to 60.5~ms and burst drain time from 220.4~s to 34.3~s, while P95 turnaround decreased from 180,989.3~ms to 4,625.5~ms. A 128~MiB boundary experiment additionally isolates three independent failure modes, which together establish 256~MiB as the practical minimum tier. These results support adaptive resource allocation for improving judge-system utilization and concurrency.
+Online Code Judge (OJ) systems often assign every submission a fixed worst-case resource limit, such as 2048~MiB of RAM and 2.0 CPU cores. We deployed our judge on Google Cloud Platform (an \texttt{e2-standard-4} instance in \texttt{asia-south1}) and measured 399 accepted submissions executing at the 256~MiB tier: 96.2\% used less than 25~MiB of resident set size (RSS), with a median of 5.7~MiB, and every submission completed inside Tier~1 without requiring promotion. We present RAAS-OCJS, a resource-aware scheduling framework that combines Linux cgroups~v2 with tiered allocation and AST-based XGBoost routing. Kernel-level profiles across C++, Python, Java, and C programs, spanning light, medium, and memory-heavy submissions, were used to drive a 10,000-submission contest simulation. Compared with static allocation, watermark-driven reactive promotion reduced reserved RAM by 81.49\% and CPU core-hours by 47.93\%, while allocating independent Tier~2 capacity on prediction alone reached only 27.85\%, because it charges predicted-heavy submissions at the worst-case ceiling rather than discovering actual need. In a simulated 500-submission freeze rush, queue wait fell from 73,134.0~ms to zero and burst drain time from 182.6~s to 34.0~s, while P95 turnaround fell from 144,649.9~ms to 4,491.7~ms. A 19-case promotion stress suite confirms the mechanism directly: submissions demanding 400~MiB exceed the 256~MiB tier in both Python and C++ with zero kernel OOM kills, and the watermark triggers exactly at its configured 179.2~MiB threshold. A 128~MiB boundary experiment additionally isolates three independent failure modes, which together establish 256~MiB as the practical minimum tier. These results support adaptive resource allocation for improving judge-system utilization and concurrency.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -114,7 +114,7 @@ The system-wide memory waste percentage $W$ across a contest of $N$ submissions 
 \begin{equation}
 W = \left[ \frac{\sum_{i=1}^N \left( R_{\mathrm{alloc}}(s_i) - R_{\mathrm{peak}}(s_i) \right)}{\sum_{i=1}^N R_{\mathrm{alloc}}(s_i)} \right] \times 100\%
 \end{equation}
-Because introductory and greedy problems require merely 6~MiB to 25~MiB, $R_{\mathrm{peak}}(s_i) \ll R_{\mathrm{max}}$. Our simulation of this waste model reports 99.57\% of allocated memory wasted under the static baseline.
+Because introductory and greedy problems require merely 6~MiB to 25~MiB, $R_{\mathrm{peak}}(s_i) \ll R_{\mathrm{max}}$. Our simulation of this waste model reports 98.83\% of allocated memory wasted under the static baseline.
 
 \subsection{Concurrency Capacity and Queueing Collapse}
 On a host with usable physical RAM $M_{\mathrm{host}}$ and operating system reserve $M_{\mathrm{os}}$, the safe concurrency capacity $K$ under non-overcommitted execution is:
@@ -140,7 +140,7 @@ Rather than statically placing containers into Tier 2, all submissions enter Tie
 \begin{equation}
 \mathrm{Threshold}_{\mathrm{wm}} = \theta \times R_{\mathrm{light}} = 0.70 \times 256\text{ MiB} = 179.2\text{ MiB}
 \end{equation}
-When $R_{\mathrm{current}}(t) \ge \mathrm{Threshold}_{\mathrm{wm}}$, the kernel emits a pressure notification. The judge daemon then lifts the limits in parallel with process execution, issuing \texttt{docker update --memory 0 --cpus 0} to raise both the memory ceiling and the CPU quota to uncapped. This leaves a 76.8~MiB safety cushion ($256 - 179.2$) so the update can complete before an OOM condition occurs. Promotion targets \emph{uncapped} rather than a fixed 2048~MiB tier: the watermark fires precisely when a submission has already shown that it outgrows Tier~1, and measured demand for such submissions ranged from 200~MB to 254~MB, so no single fixed ceiling is appropriate.
+When $R_{\mathrm{current}}(t) \ge \mathrm{Threshold}_{\mathrm{wm}}$, the kernel emits a pressure notification. The judge daemon then lifts the limits in parallel with process execution by writing \texttt{max} to the container's cgroup~v2 \texttt{memory.high} and \texttt{memory.max} files, raising both the memory ceiling and the CPU quota to uncapped without restarting the container. The kernel write is the entire promotion: it takes effect immediately and preserves process state. (An earlier implementation instead followed the cgroup write with \texttt{docker update -{}-memory 0 -{}-cpus 0}; that call is silently self-defeating, and Section~\ref{sec:promotion_verify} documents both the failure and its correction.) This leaves a 76.8~MiB safety cushion ($256 - 179.2$) so the update can complete before an OOM condition occurs. Promotion targets \emph{uncapped} rather than a fixed 2048~MiB tier: the watermark fires precisely when a submission has already shown that it outgrows Tier~1, and in our stress suite such submissions demanded 185~MB to 900~MB, so no single fixed ceiling is appropriate.
 
 % System architecture overview
 \begin{figure*}[!t]
@@ -212,12 +212,14 @@ The evaluation testbed was implemented and calibrated on dedicated bare-metal ha
 
 
 \subsection{Real Dataset Selection}
-We measured real, ground-truth execution profiles by running 72 live container evaluations across four languages: C++20 (\texttt{g++ 14.2}), Python 3.12, Java 17 (OpenJDK HotSpot), and C17 (\texttt{gcc 14.2}). Benchmark problems were drawn from the Hugging Face \texttt{deepmind/code\_contests} \cite{li2022alphacode} and \texttt{CodeNet} \cite{puri2021codenet} datasets. These 72 measured profiles are what we sample from when driving the 10,000-submission and 500-submission simulations in Section~IV; those larger scenarios were not executed as 10,000 or 500 separate live container runs. Because CodeContests is crowd-sourced, we do not take the first solution offered for a language: each candidate is first executed against the problem's own public test, and only the first candidate returning \texttt{AC} is kept. Without this screening, two of the 72 cells failed for reasons unrelated to scheduling --- a non-compiling Java submission and a Python submission computing the wrong answer, each failing identically under all four strategies. 69 of the 72 runs return \texttt{AC} at the shipped 256~MiB tier; the three exceptions are Java on the memory-heavy problem, identified in Section~\ref{sec:boundary}.
+Our primary measurement is a cloud run: 399 submissions accepted and executed live against the deployed judge at the shipped 256~MiB tier, across three languages, drawn from the Hugging Face \texttt{deepmind/code\_contests} \cite{li2022alphacode} dataset. All 399 returned \texttt{AC} inside Tier~1 and none required promotion. Because CodeContests is crowd-sourced, we do not take the first solution offered for a language: each candidate is first executed against the problem's own public test, and only the first candidate returning \texttt{AC} is kept. These 399 measured profiles are the corpus the 10,000-submission and 500-submission simulations sample from (Section~IV-B, IV-C); those larger scenarios were not executed as 10,000 or 500 separate live container runs.
 
-Table~\ref{tab:mem_dist} gives the distribution this measurement rests on. The mean of 49.2~MiB is not representative of a typical submission and should be read with care: the median is 13.4~MiB. Four memory-heavy cells, all of them the two-dimensional knapsack problem, peak at 204--254~MiB and pull the mean roughly four times above the median. The distribution is bimodal rather than merely skewed --- most submissions sit an order of magnitude below the ceiling while a small number exhaust it --- and summarising it with a single mean conceals exactly the spread that motivates adaptive tiering.
+That cloud corpus is a faithful sample of ordinary contest traffic but it contains no memory-heavy submissions at all --- its maximum peak is 47.8~MiB, far below the 179.2~MiB watermark --- so on its own it cannot exercise promotion. To represent the heavy tail we draw on an earlier bare-metal calibration: 72 live container evaluations across C++20 (\texttt{g++ 14.2}), Python 3.12, Java 17 (OpenJDK HotSpot), and C17 (\texttt{gcc 14.2}), drawn from \texttt{code\_contests} and \texttt{CodeNet} \cite{puri2021codenet}. That set contains the two-dimensional knapsack family, whose cells peak at 204--254~MiB and sit above the watermark. It yields 69 \texttt{AC} of 72 at 256~MiB, the three exceptions being Java on the memory-heavy problem, identified in Section~\ref{sec:boundary}. The simulations therefore sample a combined corpus: the 399 cloud-measured profiles, plus the heavy and medium profiles from this calibration, with the heavy family deliberately oversampled at a 20\% stress rate so that promotion and its reservation cost are exercised rather than assumed away. We report the combination explicitly because it changes the result: on the cloud-measured submissions alone the Reactive strategy saves 87.4\% of reserved memory, whereas the heavy-inclusive corpus below reports 81.49\%.
+
+The two corpora also differ in shape, and the difference is the point of the paper. In the cloud corpus the mean is 10.7~MiB against a median of 5.7~MiB; 96.2\% of runs sit below 25~MiB, and the maximum is 47.8~MiB. In the bare-metal calibration, four memory-heavy cells at 204--254~MiB pull the mean to 49.2~MiB against a median of 13.4~MiB. Both distributions are bimodal rather than merely skewed --- most submissions sit an order of magnitude below the ceiling while a small number approach it --- and summarising either with a single mean conceals exactly the spread that motivates adaptive tiering.
 
 \begin{table}[!t]
-\caption{Resident Memory Used by the 69 Submissions Returning AC at the Shipped 256 MiB Tier}
+\caption{Resident Memory Used by the 399 Cloud-Measured Submissions (256 MiB Tier, All AC)}
 \label{tab:mem_dist}
 \centering
 \scriptsize
@@ -225,15 +227,13 @@ Table~\ref{tab:mem_dist} gives the distribution this measurement rests on. The m
 \hline
 \textbf{Language} & \textbf{Runs} & \textbf{$<$25 MiB} & \textbf{Median} & \textbf{Mean} & \textbf{Max} \\
 \hline
-C & 12 & 66.7\% & 19.3 MB & 72.3 MB & 204.8 MB \\
+C++ & 168 & 95.2\% & 5.6 MB & 7.9 MB & 47.8 MB \\
 \hline
-C++ & 20 & 80.0\% & 6.6 MB & 44.7 MB & 204.6 MB \\
+Python & 119 & 100.0\% & 5.2 MB & 6.1 MB & 13.1 MB \\
 \hline
-Python & 20 & 80.0\% & 10.5 MB & 50.4 MB & 221.6 MB \\
+Java & 112 & 93.8\% & 19.3 MB & 19.6 MB & 36.8 MB \\
 \hline
-Java & 17 & 76.5\% & 23.9 MB & 36.8 MB & 253.7 MB \\
-\hline
-\textbf{All} & \textbf{69} & \textbf{76.8\%} & \textbf{13.4 MB} & \textbf{49.2 MB} & \textbf{253.7 MB} \\
+\textbf{All} & \textbf{399} & \textbf{96.2\%} & \textbf{5.7 MB} & \textbf{10.7 MB} & \textbf{47.8 MB} \\
 \hline
 \end{tabular}
 \end{table}
@@ -325,7 +325,7 @@ T_{\mathrm{tear}} + T_{\mathrm{net\_out}}
 \hline
 7. Container Teardown \& Result Egress & 12.45 ms & 11.80 ms & 13.25 ms & 12.10 ms \\
 \hline
-\textbf{Total Turnaround Latency (E2E)} & \textbf{393.00 ms} & \textbf{105.56 ms} & \textbf{988.86 ms} & \textbf{360.97 ms} \\
+\textbf{Total Turnaround Latency (E2E)} & \textbf{393.02 ms} & \textbf{105.56 ms} & \textbf{988.86 ms} & \textbf{360.97 ms} \\
 \hline
 \end{tabular}
 \end{center}
@@ -359,7 +359,7 @@ Java & 20 & 17 & 0 & 2 & 1 & Knapsack outgrows the tier \\
 
 \subsection{Classifier Routing Accuracy on the Benchmark Corpus}
 \label{sec:classifier_eval}
-The classifier is evaluated here against ground truth on the six-problem corpus, because this is the distribution the judge actually serves. Only the two-dimensional knapsack across the four languages is genuinely memory-heavy, giving 4 heavy cells against 14 light ones.
+The classifier is evaluated here against ground truth on the six-problem benchmark corpus (18 program-language cells), because this is the distribution the judge actually serves. Only the two-dimensional knapsack across the four languages is genuinely memory-heavy, giving 4 heavy cells against 14 light ones. Note that this small corpus is a different and much harder test than the 399-submission cloud corpus above: it deliberately includes the memory-heavy tail, which the cloud corpus does not.
 
 \begin{table}[!t]
 \caption{Classifier Routing Against Ground Truth on the 18 Benchmark Programs}
@@ -380,9 +380,9 @@ The classifier is evaluated here against ground truth on the six-problem corpus,
 This gives a routing accuracy of 33.3\% (6 of 18), below 77.8\% for a constant \emph{light} prediction. The classifier misses every genuinely heavy cell and raises eight false alarms. Independent API probes reproduced the direction of the error: a program peaking at 206~MB was routed \emph{light}, while one peaking at 9.6~MB was routed \emph{heavy}. This is a distribution-shift result: the same unified model reaches 87.38\% held-out accuracy on unseen CodeNet problems (Table~\ref{tab:ml_metrics}), but the six-problem corpus is small and heavy cases are under-represented.
 
 \subsection{Macro-Scale 10,000 Contest Simulation}
-To estimate resource savings across a full-scale contest, we ran a discrete-event simulation of 10,000 submissions, sampling resource-usage profiles from the 399 submissions measured on our cloud deployment, whose language mix is 68.2\% C++, 21.8\% Python, and 10.1\% Java. This is a simulation seeded with real measurements, not a live execution of 10,000 submissions. Reservation is charged from the judge's own tier decision for each submission: a bounded-tier start costs the tier size, and an uncapped start or a mid-execution promotion is charged the 2048~MiB baseline ceiling as a worst case.
+To estimate resource savings across a full-scale contest, we ran a discrete-event simulation of 10,000 submissions, sampling resource-usage profiles from the combined measured corpus described in Section~IV-A (399 cloud-measured submissions, whose language mix is 42.1\% C++, 29.8\% Python, and 28.1\% Java, together with the heavy and medium profiles from the bare-metal calibration, with the heavy family oversampled at a 20\% stress rate). This is a simulation seeded with real measurements, not a live execution of 10,000 submissions. Reservation is charged from the judge's own tier decision for each submission: a bounded-tier start costs the tier size, and an uncapped start or a mid-execution promotion is charged the 2048~MiB baseline ceiling as a worst case.
 
-Table~\ref{tab:macro_sim} reports the Reactive strategy, which was by a wide margin the most efficient measured. Hybrid reaches only 19.84\% because submissions predicted heavy are charged at the 2048~MiB ceiling, and prediction alone reaches the same 19.84\%. Because promotion only raises a reservation, classifier false alarms directly reduce savings: the classifier routed 75\% of the corpus to the heavy tier although 96.2\% of submissions never exceeded 25~MiB. Steady-state P95 turnaround spans 4,588.45--4,726.05~ms across the three adaptive strategies, indicating that the saving is primarily in reserved resources rather than per-submission latency.
+Table~\ref{tab:macro_sim} reports the Reactive strategy, which was by a wide margin the most efficient measured. Hybrid reaches only 21.84\% and prediction alone 27.85\%, because submissions predicted heavy are charged at the 2048~MiB ceiling. Because promotion only raises a reservation, classifier false alarms directly reduce savings: the classifier routed three-quarters of the benchmark corpus to the heavy tier although 96.2\% of measured submissions never exceeded 25~MiB. The 687 promotions the Reactive strategy performs (6.87\% of submissions) cost 687 further worst-case reservations, which is why its saving lands at 81.49\% rather than the 87.4\% the cloud-measured submissions alone would give.
 
 \begin{table}[!t]
 \caption{Macro-Scale 10,000 Submission Contest Simulation (256 MiB Tier)}
@@ -395,23 +395,23 @@ Table~\ref{tab:macro_sim} reports the Reactive strategy, which was by a wide mar
 \hline
 Total Submissions & 10,000 & 10,000 & --- \\
 \hline
-Total RAM Reserved & 20,000.00 GB & 2,500.00 GB & \textbf{87.50\%} \\
+Total RAM Reserved & 20,000.00 GB & 3,702.25 GB & \textbf{81.49\%} \\
 \hline
-Peak Memory Actually Used & 86.87 GB & 85.73 GB & 1.3\% \\
+Peak Memory Actually Used & 233.28 GB & 207.24 GB & 11.2\% \\
 \hline
-Allocated Memory Wasted & 99.57\% & 96.57\% & 3.00 pp \\
+Allocated Memory Wasted & 98.83\% & 94.40\% & 4.43 pp \\
 \hline
-Live Promotions & --- & 0 (0.0\%) & n/a \\
+Live Promotions & --- & 687 (6.87\%) & n/a \\
 \hline
-Total CPU Core-Hours & 16.863 hrs & 8.652 hrs & \textbf{48.68\%} \\
+Total CPU Core-Hours & 13.836 hrs & 7.204 hrs & \textbf{47.93\%} \\
 \hline
-P95 Turnaround (steady state) & 133,643.41 ms & 4,624.73 ms & \textbf{28.9$\times$} \\
+P95 Turnaround (steady state) & 66,493.94 ms & 4,549.99 ms & \textbf{14.6$\times$} \\
 \hline
 \end{tabular}
 \end{table}
 
 \subsection{Scoreboard Freeze Rush Stress Test}
-During the final 30 seconds of a competitive programming contest, participants submit a burst of solutions simultaneously. We modeled a 500-submission flash burst using the profiles measured on our bare-metal host, run through the same simulation as Section~IV-B rather than as a live 500-submission run.
+During the final 30 seconds of a competitive programming contest, participants submit a burst of solutions simultaneously. We modeled a 500-submission flash burst over the same combined measured corpus as Section~IV-B, run through the same simulation rather than as a live 500-submission run.
 
 \begin{table}[!t]
 \caption{500-Submission Freeze Rush Stress Test (15 GiB Host, 256 MiB Tier)}
@@ -424,18 +424,18 @@ During the final 30 seconds of a competitive programming contest, participants s
 \hline
 Concurrent Slots & 7 & 56 & 8.0$\times$ expansion \\
 \hline
-Avg Queue Wait & 92,712.8 ms & 60.5 ms & \textbf{99.9\% eliminated} \\
+Avg Queue Wait & 73,134.0 ms & 0.0 ms & \textbf{100\% eliminated} \\
 \hline
-P95 Queue Wait & 177,488.6 ms & 393.2 ms & \textbf{99.8\% eliminated} \\
+P95 Queue Wait & 140,801.2 ms & 0.0 ms & \textbf{100\% eliminated} \\
 \hline
-P95 Turnaround & 180,989.3 ms & 4,625.5 ms & \textbf{39.1$\times$} \\
+P95 Turnaround & 144,649.9 ms & 4,491.7 ms & \textbf{32.2$\times$} \\
 \hline
-Burst Drain Time & 220.4 s & 34.3 s & 186.1 s faster \\
+Burst Drain Time & 182.6 s & 34.0 s & 148.6 s faster \\
 \hline
 \end{tabularx}
 \end{table}
 
-As shown in Table~\ref{tab:burst_stress}, the static baseline causes severe queue congestion, while RAAS-OCJS expands safe concurrency to 56 slots and completes the burst within 34.3 seconds. The gain comes from admitting more concurrent slots, not from faster individual submissions: steady-state P95 turnaround remains about 4.6~s. Overcommitting the baseline to 14 slots recovers most of the wait but reaches 186\% host memory utilisation, illustrating the failure mode avoided by the tiered scheduler.
+As shown in Table~\ref{tab:burst_stress}, the static baseline causes severe queue congestion, while RAAS-OCJS expands safe concurrency to 56 slots and completes the burst within 34.0 seconds. Queue wait is eliminated outright rather than merely shortened. The gain comes from admitting more concurrent slots, not from faster individual submissions: steady-state P95 turnaround remains about 4.5~s. Overcommitting the baseline to 14 slots recovers most of the wait but reaches 186.7\% host memory utilisation, illustrating the failure mode avoided by the tiered scheduler.
 
 \subsection{Promotion Mechanism Verification}
 \label{sec:promotion_verify}
@@ -474,7 +474,7 @@ VMs for 500-Sub Burst & 72 & 9 & \textbf{87.5\% fewer} \\
 \hline
 Cluster Hourly Cost & USD 11.59 & USD 1.45 & \textbf{USD 10.14} \\
 \hline
-10k RAM Reserved & 20,000.00 GB & 2,500.00 GB & \textbf{87.50\%} \\
+10k RAM Reserved & 20,000.00 GB & 3,702.25 GB & \textbf{81.49\%} \\
 \hline
 \end{tabularx}
 \end{table}
@@ -487,14 +487,14 @@ The hourly saving is \textbf{USD~10.14}, an 87.5\% reduction in cluster cost.
 \label{sec:boundary}
 To locate the floor, we re-ran the full 72-run benchmark with Tier~1 set to \textbf{128~MiB} ($\theta = 70\%$, watermark $= 89.6$~MiB, leaving a 38.4~MiB buffer below the hard limit).
 
-The 128~MiB tier fails for three independent reasons. Only 52 of 72 runs return \texttt{AC}, versus 69 of 72 at 256~MiB (Table~\ref{tab:128mb_boundary}). \textbf{(1) C++ compilation:} eight C++ runs return \texttt{SE}; direct measurement shows \texttt{g++ -O2} peaks at 189--211~MB (P1--P4: 189.4, 190.9, 198.2, 210.8~MB), so the container cannot compile them. The knapsack source itself compiles in 60.6~MB. \textbf{(2) Watermark window:} the 89.6~MiB watermark leaves only 38.4~MiB before the hard limit; knapsack crosses 128~MiB before promotion completes (253--794~ms). At 256~MiB, the 76.8~MiB window holds for C, C++ and Python. \textbf{(3) JVM allowance:} Java also fails at 256~MiB, with three \texttt{MLE}s and 255--256~MB peaks, because \texttt{-Xmx512m} exceeds the 256~MiB container cap.
+The 128~MiB tier fails for three independent reasons. Only 52 of 72 runs return \texttt{AC}, versus 69 of 72 at 256~MiB (Table~\ref{tab:128mb_boundary}). \textbf{(1) C++ compilation:} eight C++ runs return \texttt{SE}; direct measurement shows \texttt{g++ -O2} peaks at 189--211~MB (P1--P4: 189.4, 190.9, 198.2, 210.8~MB), so the container cannot compile them. The knapsack source itself compiles in 60.6~MB. \textbf{(2) Watermark window:} the 89.6~MiB watermark leaves only 38.4~MiB before the hard limit; knapsack crosses 128~MiB before promotion completes (253--794~ms). At 256~MiB, the 76.8~MiB window holds for C, C++ and Python. \textbf{(3) JVM allowance:} Java also fails at 256~MiB on the memory-heavy problem, because the JVM heap ceiling is fixed at launch and \texttt{-Xmx512m} exceeds the 256~MiB container cap. The failure signature depends on how the heap is sized: in this calibration the JVM is killed at the cap (three \texttt{MLE}s at 255--256~MB peaks), whereas on the cloud deployment the same condition surfaced as an \texttt{OutOfMemoryError} inside the JVM's own heap (\texttt{RE} at a 187.6~MiB peak, Section~\ref{sec:promotion_verify}). Either way promotion cannot rescue it, since the limit is the JVM's and not the container's.
 
 These observations establish \textbf{256~MiB as the practical minimum Tier~1 limit}: the tier must accommodate the build toolchain, the promotion window, and runtime overhead above the program's working set.
 
 \section{Conclusion}
-Fixed worst-case limits reduce concurrency on online judges, especially on fixed hardware. Measured on a deployed Google Cloud Platform instance and projected across a 10,000-submission contest, RAAS-OCJS reclaimed 87.50\% of reserved memory (2,500.00~GB of 20,000) and cut CPU core-hours by 48.68\% relative to a static 2048~MiB baseline. The simulated 500-submission burst reduced average queue wait from 92,712.8~ms to 60.5~ms and shortened burst drain time from 220.4~s to 34.3~s.
+Fixed worst-case limits reduce concurrency on online judges, especially on fixed hardware. Measured on a deployed Google Cloud Platform instance and projected across a 10,000-submission contest, RAAS-OCJS reclaimed 81.49\% of reserved memory (3,702.25~GB of 20,000) and cut CPU core-hours by 47.93\% relative to a static 2048~MiB baseline. The simulated 500-submission burst eliminated average queue wait entirely, from 73,134.0~ms to zero, and shortened burst drain time from 182.6~s to 34.0~s.
 
-Three findings qualify the result. First, watermark-driven reactive promotion was markedly more efficient than classifier-driven routing on this corpus: the classifier alone reached 19.84\%, and Hybrid fared no better, because predicted-heavy submissions are charged at the worst-case ceiling rather than allowed to discover their actual need. The classifier sent 75\% of the corpus to the heavy tier while 96.2\% of submissions never exceeded 25~MiB, so its saving came from trimming a few hundred MiB per submission rather than from matching allocation to requirement. Second, routing accuracy on the six-problem corpus was only 33.3\%, despite 87.38\% held-out accuracy on unseen CodeNet problems, showing distribution sensitivity. Third, the 128~MiB boundary failed because of C++ toolchain memory (189--211~MB), an insufficient promotion window, and a Java \texttt{-Xmx512m} allowance inside a 256~MiB container.
+Three findings qualify the result. First, watermark-driven reactive promotion was markedly more efficient than classifier-driven routing on this corpus: prediction alone reached 27.85\% and Hybrid 21.84\%, because predicted-heavy submissions are charged at the worst-case ceiling rather than allowed to discover their actual need. The classifier sent three-quarters of the benchmark corpus to the heavy tier while 96.2\% of measured submissions never exceeded 25~MiB, so its saving came from trimming a few hundred MiB per submission rather than from matching allocation to requirement. Second, routing accuracy on the six-problem corpus was only 33.3\%, despite 87.38\% held-out accuracy on unseen CodeNet problems, showing distribution sensitivity. Third, the 128~MiB boundary failed because of C++ toolchain memory (189--211~MB), an insufficient promotion window, and a Java \texttt{-Xmx512m} allowance inside a 256~MiB container.
 
 Overall, the measurements support bounded adaptive allocation with watermark-based promotion as the load-bearing mechanism, and indicate that learned routing must be calibrated against the deployment's own workload before it can outperform the simpler watermark. That mechanism was verified directly rather than assumed: submissions demanding 400~MiB exceed the 256~MiB tier across two languages and both allocation styles without a single OOM kill, and the watermark triggers exactly at its configured threshold (Section~\ref{sec:promotion_verify}). Broader real-world workloads are required for further validation.
 
