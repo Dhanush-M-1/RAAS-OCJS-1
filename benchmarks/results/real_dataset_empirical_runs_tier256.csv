@@ -398,3 +398,27 @@ cc_846_E_Chemistry_in_Berland_python_baseline,846_E_Chemistry_in_Berland,846_E. 
 cc_846_E_Chemistry_in_Berland_python_predictive,846_E_Chemistry_in_Berland,846_E. Chemistry in Berland,code_contests,Graph / Trees,CODEFORCES,11,PYTHON,Predictive,AC,5,397,high,False,0,2048.0,5.2,2042.8,99.75,2.0,2048,401,1215,1445.18
 cc_846_E_Chemistry_in_Berland_python_reactive,846_E_Chemistry_in_Berland,846_E. Chemistry in Berland,code_contests,Graph / Trees,CODEFORCES,11,PYTHON,Reactive,AC,5,397,low,False,0,256.0,5.22,250.78,97.96,1.0,1024,403,1260,1586.15
 cc_846_E_Chemistry_in_Berland_python_hybrid,846_E_Chemistry_in_Berland,846_E. Chemistry in Berland,code_contests,Graph / Trees,CODEFORCES,11,PYTHON,Hybrid,AC,5,397,high,False,0,2048.0,5.2,2042.8,99.75,2.0,2048,407,1215,1529.28
+syn_000_S1_knapsack_heavy_cpp_baseline,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,CPP,Baseline,AC,1,0,high,False,0,2048.0,203.87,1844.13,90.05,2.0,2048,187,661,672.73
+syn_001_S1_knapsack_heavy_cpp_predictive,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,CPP,Predictive,AC,1,0,low,False,0,256.0,204.22,51.78,20.23,1.0,1024,181,669,682.36
+syn_002_S1_knapsack_heavy_cpp_reactive,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,CPP,Reactive,AC,1,0,low,True,577,2048.0,176.61,1871.39,91.38,2.0,2048,184,674,701.28
+syn_003_S1_knapsack_heavy_cpp_hybrid,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,CPP,Hybrid,AC,1,0,low,True,609,2048.0,204.41,1843.59,90.02,2.0,2048,186,713,723.71
+syn_004_S1_knapsack_heavy_python_baseline,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,PYTHON,Baseline,AC,1,0,high,False,0,2048.0,221.35,1826.65,89.19,2.0,2048,93,370,379.6
+syn_005_S1_knapsack_heavy_python_predictive,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,PYTHON,Predictive,AC,1,0,low,False,0,256.0,221.62,34.38,13.43,1.0,1024,96,315,324.56
+syn_006_S1_knapsack_heavy_python_reactive,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,PYTHON,Reactive,AC,1,0,low,True,254,2048.0,173.86,1874.14,91.51,2.0,2048,98,315,323.07
+syn_007_S1_knapsack_heavy_python_hybrid,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,PYTHON,Hybrid,AC,1,0,low,True,258,2048.0,174.07,1873.93,91.5,2.0,2048,96,313,322.03
+syn_008_S1_knapsack_heavy_java_baseline,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,JAVA,Baseline,AC,1,0,high,False,0,2048.0,282.32,1765.68,86.21,2.0,2048,149,668,688.03
+syn_009_S1_knapsack_heavy_java_predictive,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,JAVA,Predictive,RE,1,0,low,False,0,256.0,202.64,53.36,20.84,1.0,1024,135,836,851.87
+syn_010_S1_knapsack_heavy_java_reactive,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,JAVA,Reactive,RE,1,0,low,True,743,2048.0,202.48,1845.52,90.11,2.0,2048,138,827,835.35
+syn_011_S1_knapsack_heavy_java_hybrid,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,JAVA,Hybrid,RE,1,0,low,True,766,2048.0,202.96,1845.04,90.09,2.0,2048,139,835,847.55
+syn_012_S1_knapsack_heavy_c_baseline,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,C,Baseline,AC,1,0,high,False,0,2048.0,201.0,1847.0,90.19,2.0,2048,67,343,351.09
+syn_013_S1_knapsack_heavy_c_predictive,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,C,Predictive,AC,1,0,low,False,0,256.0,204.57,51.43,20.09,1.0,1024,67,354,362.92
+syn_014_S1_knapsack_heavy_c_reactive,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,C,Reactive,AC,1,0,low,True,294,2048.0,200.21,1847.79,90.22,2.0,2048,67,357,369.02
+syn_015_S1_knapsack_heavy_c_hybrid,S1_knapsack_heavy,S1_knapsack_heavy,synthetic,DP / State Table,SYNTHETIC,-1,C,Hybrid,AC,1,0,low,True,301,2048.0,175.54,1872.46,91.43,2.0,2048,71,355,365.36
+syn_016_S2_prefix_light_c_baseline,S2_prefix_light,S2_prefix_light,synthetic,Data Structures,SYNTHETIC,-1,C,Baseline,AC,1,0,high,False,0,2048.0,19.27,2028.73,99.06,2.0,2048,21,303,315.22
+syn_017_S2_prefix_light_c_predictive,S2_prefix_light,S2_prefix_light,synthetic,Data Structures,SYNTHETIC,-1,C,Predictive,AC,1,0,high,False,0,2048.0,17.16,2030.84,99.16,2.0,2048,24,299,306.37
+syn_018_S2_prefix_light_c_reactive,S2_prefix_light,S2_prefix_light,synthetic,Data Structures,SYNTHETIC,-1,C,Reactive,AC,1,0,low,False,0,256.0,20.19,235.81,92.11,1.0,1024,24,311,330.72
+syn_019_S2_prefix_light_c_hybrid,S2_prefix_light,S2_prefix_light,synthetic,Data Structures,SYNTHETIC,-1,C,Hybrid,AC,1,0,high,False,0,2048.0,19.05,2028.95,99.07,2.0,2048,21,293,303.88
+syn_020_S3_floyd_cpu_c_baseline,S3_floyd_cpu,S3_floyd_cpu,synthetic,Graph / Trees,SYNTHETIC,-1,C,Baseline,AC,1,0,high,False,0,2048.0,6.17,2041.83,99.7,2.0,2048,57,340,346.95
+syn_021_S3_floyd_cpu_c_predictive,S3_floyd_cpu,S3_floyd_cpu,synthetic,Graph / Trees,SYNTHETIC,-1,C,Predictive,AC,1,0,low,False,0,256.0,6.8,249.2,97.34,1.0,1024,59,340,351.18
+syn_022_S3_floyd_cpu_c_reactive,S3_floyd_cpu,S3_floyd_cpu,synthetic,Graph / Trees,SYNTHETIC,-1,C,Reactive,AC,1,0,low,False,0,256.0,6.89,249.11,97.31,1.0,1024,58,330,339.05
+syn_023_S3_floyd_cpu_c_hybrid,S3_floyd_cpu,S3_floyd_cpu,synthetic,Graph / Trees,SYNTHETIC,-1,C,Hybrid,AC,1,0,low,False,0,256.0,6.26,249.74,97.56,1.0,1024,57,322,333.1
