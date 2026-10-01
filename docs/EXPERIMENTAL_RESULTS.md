@@ -117,7 +117,7 @@ holds at that size (Section 4.2).
 | Language | n | share | CPU ms | wall ms | P95 ms | waste |
 |---|---|---|---|---|---|---|
 | C++ | 6743 | 67.4% | 115.7 -> 116.4 | 1219.1 -> 1216.8 | 1514.1 -> 1526.8 | 99.47% -> 95.87% |
-| Java | 1008 | 10.1% | 290.2 -> 292.1 | 876.8 -> 1127.9 | 1003.8 -> 1332.8 | 98.82% -> 90.99% |
+| Java | 869 | 8.7% | 811.8 -> 818.3 | 3252.6 -> 3264.2 | 3566.4 -> 3605.8 | 97.45% -> 91.29% |
 | Python | 2249 | 22.5% | 152.9 -> 153.0 | 451.4 -> 449.3 | 663.2 -> 659.5 | 99.46% -> 95.65% |
 
 All three languages sit at the same **87.5%** memory saving under Reactive.
@@ -172,7 +172,8 @@ own macro simulation
 (`benchmarks/results/real_dataset_strategy_summary_tier256.csv`), in which Reactive
 records **zero** live promotions — so it reserves exactly $10{,}000 \times 256$ MiB
 $= 2{,}500$ GB. The project paper reports the *same nominal experiment* — 10,000
-submissions at the 256 MiB tier — as **10,557.00 GB reserved, a 47.22% reduction**
+submissions at the 256 MiB tier — as 10,557.00 GB reserved, a 47.22% reduction, in superseded
+drafts (**that paper now reports 3,702.25 GB / 81.49% / 687 promotions**)
 at a **20.3%** promotion rate. **This discrepancy is now resolved:** the paper was
 citing a corpus mix that no longer matches the harness. On the combined corpus the
 harness reports **3,702.25 GB reserved, an 81.49% reduction, at a 6.87% promotion

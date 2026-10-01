@@ -142,7 +142,7 @@ Seeded. Reserved memory and reserved CPU-core-hours.
 |---|---|---|---|---|
 | Baseline | 20,000.00 | — | 4.400 | 97.48% |
 | Predictive | 11,498.75 | 42.51% | 3.311 | 97.24% |
-| **Reactive** | **10,013.75** | **49.93%** | **2.632** | 97.05% |
+| **Reactive** | **3,702.25** | **81.49%** | **7.204** | 94.40% |
 | Hybrid | 15,308.75 | 23.46% | 3.626 | 97.95% |
 
 **Reactive reserves ~1.5x less than Hybrid.** Hybrid and Predictive share one

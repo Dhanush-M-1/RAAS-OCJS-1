@@ -126,7 +126,7 @@ Live promotions were 0 for all four strategies. Slots are derived, never hardcod
 | Language | n | Share | Avg CPU (ms) | Avg wall (ms) | P95 (ms) | Waste |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | C++ | 6743 | 67.4% | 115.7 → 116.4 | 1219.1 → 1216.8 | 1514.1 → 1526.8 | 99.47% → 95.87% |
-| Java | 1008 | 10.1% | 290.2 → 292.1 | 876.8 → 1127.9 | 1003.8 → 1332.8 | 98.82% → 90.99% |
+| Java | 869 | 8.7% | 811.8 → 818.3 | 3252.6 → 3264.2 | 3566.4 → 3605.8 | 97.45% → 91.29% |
 | Python | 2249 | 22.5% | 152.9 → 153.0 | 451.4 → 449.3 | 663.2 → 659.5 | 99.46% → 95.65% |
 
 All three languages save 87.5% under Reactive.

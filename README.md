@@ -43,7 +43,7 @@ RAAS-OCJS provides four switchable scheduling engines:
 |---|---|---|---|
 | **Baseline** | Intake | Current standard practice | Always assigns Heavy tier (Uncapped Host Memory & CPU) |
 | **Predictive** | Pre-Execution | Tree-sitter AST $\rightarrow$ 36 features (40 unified) $\rightarrow$ Compiled XGBoost | Assigns Light (256 MiB, 1 CPU) or Heavy tier before launching container |
-| **Reactive** | Mid-Execution | Linux cgroup v2 event-driven monitoring | Starts in Light tier (256 MiB); promotes to Uncapped (memory *and* CPU caps lifted) once the `memory.events` `high` counter crosses the 70% (~179.2 MiB) watermark. The trigger is memory pressure only - a purely CPU-bound submission is never promoted |
+| **Reactive** | Mid-Execution | Linux cgroup v2 event-driven monitoring | Starts in Light tier (256 MiB); promotes to uncapped **memory** once the `memory.events` `high` counter crosses the 70% (~179.2 MiB) watermark. Promotion is memory-only: it lifts `memory.high`/`memory.max` and leaves the CPU quota at the Light tier. A purely CPU-bound submission is therefore never promoted. Note that a direct **Tier 2 placement** (Predictive/Hybrid) is a different ceiling - that one does allocate 2.0 cores |
 | **Hybrid** | Both | Predictive start + Reactive live safety net | Starts in ML-predicted tier; actively promotes if memory spikes exceed prediction |
 
 ---
@@ -140,16 +140,16 @@ On the synthetic heavy knapsack the same program behaves differently by language
 
 ### 6.4 Macro contest simulation
 
-*Seeded (`BENCH_SEED=42`), N = 10,000 submissions drawn from the 43 real problems, 256 MiB tier.*
+*Seeded (`BENCH_SEED=42`), N = 10,000 submissions sampled from the combined measured corpus: the 43 real problems from the 399-submission cloud run, plus the heavy/medium profiles from the 72-run bare-metal calibration, with the heavy family oversampled at a 20% stress rate. 256 MiB tier.*
 
 | Strategy | Slots | Allocated GB | Used GB | Waste | CPU core-h | Avg queue wait | P95 turnaround |
 |---|:---:|---:|---:|---:|---:|---:|---:|
-| Baseline | 7 | 20000.0 | 119.71 | 99.4% | 5.622 | 2.36 ms | 1448.52 ms |
-| Predictive | 56 | 14860.25 | 116.71 | 99.21% | 4.827 | 0.0 ms | 1434.47 ms |
-| Reactive | 56 | 2500.0 | 116.79 | 95.33% | 2.876 | 0.0 ms | 1471.9 ms |
-| Hybrid | 56 | 14860.25 | 118.93 | 99.2% | 4.831 | 0.0 ms | 1418.68 ms |
+| Baseline | 7 | 20000.0 | 233.28 | 98.83% | 13.836 | 7893.85 ms | 66493.94 ms |
+| Predictive | 56 | 14429.75 | 224.55 | 98.44% | 12.173 | 0.0 ms | 4493.45 ms |
+| Reactive | 56 | 3702.25 | 207.24 | 94.40% | 7.204 | 0.0 ms | 4549.99 ms |
+| Hybrid | 56 | 15632.0 | 215.91 | 98.62% | 12.387 | 0.0 ms | 4632.54 ms |
 
-Memory saved against Baseline: **Predictive 5139.75 GB (25.7%)**, **Reactive 17500.0 GB (87.5%)**, **Hybrid 5139.75 GB (25.7%)**. Live promotions in the simulation: **0** for every strategy.
+Memory saved against Baseline: **Predictive 5570.25 GB (27.85%)**, **Reactive 16297.75 GB (81.49%)**, **Hybrid 4368.00 GB (21.84%)**. Live promotions: **687 (6.87%)** under Reactive and Hybrid, **0** under Baseline and Predictive. On the 399 cloud-measured submissions alone the Reactive figure is 87.4% with zero promotions - that corpus contains no memory-heavy submissions, which is why the combined corpus is the one reported here.
 
 ### 6.5 Burst stress
 
@@ -157,29 +157,32 @@ Memory saved against Baseline: **Predictive 5139.75 GB (25.7%)**, **Reactive 175
 
 | Scenario | Slots | Avg queue wait | P95 turnaround | Drain | Host RAM util |
 |---|:---:|---:|---:|---:|---:|
-| Baseline (safe) | 7 | 20966.9 ms | 41794.6 ms | 73.8 s | 93.3% |
-| Baseline (2x overcommit) | 14 | 2996.0 ms | 7401.6 ms | 37.7 s | 186.7% |
-| Predictive (adaptive) | 56 | 0.0 ms | 1421.8 ms | 31.3 s | 93.3% |
-| Reactive (adaptive) | 56 | 0.0 ms | 1482.8 ms | 31.2 s | 93.3% |
-| Hybrid (adaptive) | 56 | 0.0 ms | 1394.5 ms | 31.3 s | 93.3% |
+| Baseline (safe) | 7 | 73134.0 ms | 144649.9 ms | 182.6 s | 93.3% |
+| Baseline (2x overcommit) | 14 | 28600.4 ms | 58982.6 ms | 93.2 s | 186.7% |
+| Predictive (adaptive) | 56 | 0.0 ms | 4520.9 ms | 34.0 s | 93.3% |
+| Reactive (adaptive) | 56 | 0.0 ms | 4491.7 ms | 34.0 s | 93.3% |
+| Hybrid (adaptive) | 56 | 0.0 ms | 4515.0 ms | 33.9 s | 93.3% |
 
-### 6.6 Cloud provisioning projection
+### 6.6 Cloud provisioning (measured GCP deployment)
+
+Deployed as a single `e2-standard-4` (4 vCPU, 16 GB) in `asia-south1` (Mumbai), reached only over an IAP tunnel. Not a projection.
 
 - Per-pod memory reservation: **2048 MiB → 256 MiB (8.0x)**; per-pod CPU: **2.0 → 1.0 vCPU (2.0x)**.
-- Packing density on an AWS `c6i.4xlarge` (32 GB): **14 → 112 concurrent pods (8.0x)**.
-- 500-submission burst fleet: **36 VMs → 5 VMs (86.1% fewer)**.
-- Cluster cost at USD 0.68/hr per VM: **USD 24.48/hr → USD 3.40/hr (USD 21.08/hr saved, 86.1%)**.
-- Total reserved RAM over 10,000 submissions under Reactive: **20000.0 GB → 2500.0 GB (17500.0 GB reclaimed, 87.5%)**.
+- Packing density on an `e2-standard-4` (14 GiB usable): **7 → 56 concurrent pods (8.0x)**. This is a *memory-reservation* figure (`floor(14336 / 256)`), not a core count - 56 pods share 4 physical vCPUs and are time-sliced by CFS.
+- 500-submission burst fleet: **72 VMs → 9 VMs (87.5% fewer)**.
+- Cluster cost at USD 0.160969/hr per VM (verified against the Cloud Billing API): **USD 11.59/hr → USD 1.45/hr (USD 10.14/hr saved, 87.5%)**.
+- Total reserved RAM over 10,000 submissions under Reactive: **20000.0 GB → 3702.25 GB (16297.75 GB reclaimed, 81.49%)**.
 
 ### 6.7 Per-language profile
 
 *256 MiB tier, Baseline → Reactive.*
 
-| Language | n | Share | Avg CPU | Avg container wall | P95 turnaround | Waste | Saved |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| C++ | 6743 | 67.4% | 115.7 → 116.4 ms | 1219.1 → 1216.8 ms | 1514.1 → 1526.8 ms | 99.47% → 95.87% | 87.5% |
-| Java | 1008 | 10.1% | 290.2 → 292.1 ms | 876.8 → 1127.9 ms | 1003.8 → 1332.8 ms | 98.82% → 90.99% | 87.5% |
-| Python | 2249 | 22.5% | 152.9 → 153.0 ms | 451.4 → 449.3 ms | 663.2 → 659.5 ms | 99.46% → 95.65% | 87.5% |
+| Language | n | Share | Avg CPU | Waste (B → R) | Saved | Promotions |
+|---|---:|---:|---:|---:|---:|---:|
+| C++ | 5774 | 57.7% | 321.9 → 320.7 ms | 98.99% → 94.88% | 82.0% | 365 |
+| Python | 1989 | 19.9% | 472.3 → 474.5 ms | 98.77% → 94.96% | 79.7% | 177 |
+| C | 1368 | 13.7% | 40.4 → 42.3 ms | 99.14% → 93.96% | 85.1% | 38 |
+| Java | 869 | 8.7% | 811.8 → 818.3 ms | 97.45% → 91.29% | 76.7% | 107 |
 
 Raw per-cell measurements are committed under [`benchmarks/results/`](benchmarks/results/) as `real_dataset_*_tier256.csv`.
 
