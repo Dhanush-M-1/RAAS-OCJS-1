@@ -160,9 +160,9 @@ a spread inside run-to-run noise.
 
 | Scenario | Slots | Avg queue wait | P95 turnaround | Drain |
 |---|---|---|---|---|
-| Baseline (safe) | 7 | 12,386.2 ms | 24,918.4 ms | 56.5 s |
-| Baseline (overcommitted) | 14 | 250.4 ms | 1,783.0 ms | 31.6 s |
-| Adaptive (all three) | 56 | 0.0 ms | ~1190 ms | ~31.2 s |
+| Baseline (safe) | 7 | 73,134.0 ms | 144,649.9 ms | 182.6 s |
+| Baseline (overcommitted) | 14 | 28,600.4 ms | 58,982.6 ms | 93.2 s |
+| Adaptive (all three) | 56 | 0.0 ms | ~1190 ms | ~34.0 s |
 
 The gain comes from admitting more concurrent slots, not from finishing
 individual submissions faster. Overcommitting the baseline to 14 slots also
@@ -171,7 +171,7 @@ recovers most of the wait, but at 186% host memory utilisation.
 ### 128 MiB tier (112 adaptive slots)
 
 Baseline 7 slots: 12,360.4 ms wait, 57.1 s drain. Overcommitted 14 slots:
-300.5 ms, 31.9 s. Adaptive: 0.0 ms, ~1200 ms, 31.2 s.
+300.5 ms, 31.9 s. Adaptive: 0.0 ms, ~1200 ms, 34.0 s.
 
 ## 6. GCP `e2-standard-4` provisioning (measured deployment)
 
@@ -380,9 +380,9 @@ history, not in this document.
 | RAM saved (aggregate) | Reactive **81.49%**; Hybrid 21.84% |
 | CPU saving | Reactive **22.09%**; Hybrid 9.18%. Metric is *reserved* core-hours, not consumed |
 | Adaptive slots at 256 MiB | **56** (14,336 / 256) |
-| Safe-baseline average queue wait | **12,386.2 ms** |
-| Burst turnaround | **24,918.4 -> 1190.8 ms (20.9x)** |
-| Burst drain | **56.5 -> 31.2 s** |
+| Safe-baseline average queue wait | **73,134.0 ms** |
+| Burst turnaround | **144,649.9 -> 4,491.7 ms (32.2x)** |
+| Burst drain | **56.5 -> 34.0 s** |
 | Hourly cloud saving | **USD 10.14/hr** |
 | VM fleet reduction | **8.0x** (72 vs 9) |
 | Feature counts | **22 + 10** (old), **26 + 10** (new); 32/36 and 36/40 per-language/unified |

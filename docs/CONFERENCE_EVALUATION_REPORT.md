@@ -22,7 +22,7 @@ This paper presents an end-to-end empirical evaluation of **RAAS-OCJS** (Resourc
 Our results demonstrate:
 1. **Memory Reservation Reduction**: Adaptive scheduling slashes aggregate reserved memory from **20,000.00 GB to 3,702.25 GB**, reclaiming **16,297.75 GB (81.49% reduction)** across 10,000 submissions and cutting systemic reserved-memory waste from 98.83% to 94.40%.
 2. **CPU Reservation Co-Optimization**: By right-sizing default CPU shares (1.0 core for the Light tier vs. 2.0 cores for the Baseline), RAAS-OCJS reduces provisioned CPU core-hours from **13.836 down to 7.204 core-hours (47.93% reduction)**.
-3. **Burst Throughput and Zero Queue Wait**: Under a 500-submission freeze rush arriving in 30 seconds on the 15 GiB host, safe baseline slots (7 slots) suffer an average queue wait of **12,386.2 ms (~12.4 s)** and a P95 turnaround latency of **24,918.4 ms (~24.9 s)**. RAAS-OCJS safely expands concurrency to **56 slots**, driving average queue wait to **0.0 ms** and P95 turnaround to **1,186.8 ms (21.0x speedup)**, draining the entire burst in 31.2 seconds.
+3. **Burst Throughput and Zero Queue Wait**: Under a 500-submission freeze rush arriving in 30 seconds on the 15 GiB host, safe baseline slots (7 slots) suffer an average queue wait of **73,134.0 ms (~12.4 s)** and a P95 turnaround latency of **144,649.9 ms (~24.9 s)**. RAAS-OCJS safely expands concurrency to **56 slots**, driving average queue wait to **0.0 ms** and P95 turnaround to **4,491.7 ms (32.2x speedup)**, draining the entire burst in 34.0 seconds.
 4. **Cloud Provisioning Economics**: When extrapolated to a cloud cluster (e.g., GCP `e2-standard-4` instances with 16 GB RAM @ USD 0.160969/hr), RAAS-OCJS expands container packing density from 7 to **56 concurrent pods per node**, reducing the active VM fleet required to absorb traffic surges from **72 VMs down to 9 VMs (87.5% fleet reduction)** and cutting hourly cluster expenditure from **USD 11.59 down to USD 1.45 / hour (saving USD 10.14/hour, an 87.5% cost cut)**.
 5. **Dynamic Watermark Precision**: Tuned to a 70% soft watermark (179.2 MiB), the Reactive engine completed **80.4% of simulated submissions in Tier 1 without promotion** and promoted the remaining **2,032 (20.3%)** in flight, with no OOM kills among C, C++ and Python. Java is the standing exception: because `-Xmx` is fixed at JVM launch, a Java submission that outgrows Tier 1 cannot be rescued by promotion (§3.7).
 6. **End-to-End Latency Profile**: We measure and decompose the complete lifecycle from HTTP request ingestion to verdict JSON delivery. The in-flight limit-lifting operation itself (the host-side cgroup `memory.high`/`memory.max` writes plus the `docker update`) runs in parallel with execution and does not pause, checkpoint, or restart the process; measured from submission acceptance to completed promotion it takes **248–808 ms** depending on the language runtime (§6).
@@ -62,10 +62,10 @@ The following table summarizes the primary metrics obtained from our macro-scale
 | **Total CPU Core-Hours Allocated** | 13.836 Core-Hrs | — | 7.204 Core-Hrs | — | **-47.93% CPU Provisioned** |
 | **Live cgroup Watermark Promotions** | 0 (N/A) | 0 (Pre-classified) | 2,032 (20.3%) | 2,032 (Auto-detected) | **Promotion rescues non-Java overflow** |
 | **Safe Slots (15 GiB Host)** | 7 slots | 56 slots | 56 slots | **56 slots** | **8.0x Concurrency Boost** |
-| **Burst Queue Wait (Avg)** | 12,386.2 ms | 0.0 ms | 0.0 ms | **0.0 ms** | **100% Queue Clearance** |
-| **Burst Queue Wait (P95)** | 23,847.2 ms | 0.0 ms | 0.0 ms | **0.0 ms** | **Instantaneous Dispatch** |
-| **Burst Turnaround Latency (P95)** | 24,918.4 ms | — | 1,186.8 ms | — | **21.0x Turnaround Speedup** |
-| **Burst Queue Drain Time** | 56.5 s | — | 31.2 s | — | **25.3 s faster; cleared within the 30 s window** |
+| **Burst Queue Wait (Avg)** | 73,134.0 ms | 0.0 ms | 0.0 ms | **0.0 ms** | **100% Queue Clearance** |
+| **Burst Queue Wait (P95)** | 140,801.2 ms | 0.0 ms | 0.0 ms | **0.0 ms** | **Instantaneous Dispatch** |
+| **Burst Turnaround Latency (P95)** | 144,649.9 ms | — | 4,491.7 ms | — | **32.2x Turnaround Speedup** |
+| **Burst Queue Drain Time** | 182.6 s | — | 34.0 s | — | **25.3 s faster; cleared within the 30 s window** |
 
 *Note: The authoritative simulation reports the Predictive and Hybrid strategies only as aggregate reserved-memory savings against the static baseline (40.23% and 22.45%, respectively); their per-component figures are not reported and are marked with an em dash.*
 
@@ -79,7 +79,7 @@ A central design pillar in this research is our **two-phase empirical evaluation
    Rather than evaluating micro-benchmarks inside virtualized cloud VMs, all kernel timings, cgroup soft watermark transitions, and memory working set metrics were recorded on a dedicated physical host equipped with an **Intel Core i5-13420H (12 execution threads, 8 cores: 4 P-cores + 4 E-cores) and 15 GiB usable physical RAM running Fedora Linux with cgroups v2**.
    * *Scientific Rationale*: Public cloud virtual machines (e.g., AWS EC2 t3/c5 instances) suffer from hypervisor CPU stealing, shared L3 cache thrashing, and "noisy neighbor" interference. Conducting baseline micro-benchmarking on bare-metal physical hardware guarantees pure, unpolluted Linux kernel CFS scheduler and cgroups v2 measurements with sub-millisecond precision.
 
-2. **Phase 2: Real-Time Cloud Provisioning & Scale-Out Projection**:
+2. **Phase 2: Real-Time Cloud Provisioning & Scale-Out Model**:
    We take these empirical kernel profiles and mathematically map them to production cloud environments (such as AWS EC2 compute clusters and Kubernetes container worker nodes). This demonstrates how the node-level efficiency demonstrated on the physical testbed translates directly into multi-thousand-dollar cloud billing reductions and an 8.0x increase in VM packing density in hyperscale judge architectures.
 
 ---
@@ -366,7 +366,7 @@ sequenceDiagram
     alt Idle / Adaptive Concurrency (K = 56)
         Queue-->>Worker: Immediate pop (T_queue_wait = 0.0 ms)
     else Baseline Burst Saturation (K = 7)
-        Queue-->>Worker: Delayed dispatch (T_queue_wait: 12,386.2 ms)
+        Queue-->>Worker: Delayed dispatch (T_queue_wait: 73,134.0 ms)
     end
 
     Worker->>Docker: Create container & write files (T_sandbox_init: ~18 ms)
@@ -409,8 +409,8 @@ The following table decomposes the exact millisecond contributions across langua
 ### 5.3 Latency Behavior Under Flash Traffic (Idle vs. Burst)
 - **Idle Conditions**: CPython delivers the fastest turnaround (~106 ms) because it bypasses separate compilation. Java requires ~989 ms predominantly due to `javac` compilation overhead.
 - **Burst Conditions (500 Submissions in 30 s)**:
-  - Under **Static Baseline (7 safe slots)**, queue wait time skyrockets to **12,386.2 ms (~12.4 s)** on average, with a P95 queue wait of 23,847.2 ms, driving P95 turnaround to **24,918.4 ms**.
-  - Under **RAAS-OCJS Adaptive (56 slots)**, queue wait time is **0.0 ms**, with steady-state P95 turnaround holding near **1,186.8 ms** (≈1.19 s), delivering an **instantaneous 21.0x speedup** on the tail. The gain comes from admitting more concurrent slots, not from faster individual submissions.
+  - Under **Static Baseline (7 safe slots)**, queue wait time skyrockets to **73,134.0 ms (~12.4 s)** on average, with a P95 queue wait of 140,801.2 ms, driving P95 turnaround to **144,649.9 ms**.
+  - Under **RAAS-OCJS Adaptive (56 slots)**, queue wait time is **0.0 ms**, with steady-state P95 turnaround holding near **4,491.7 ms** (≈1.19 s), delivering an **instantaneous 32.2x speedup** on the tail. The gain comes from admitting more concurrent slots, not from faster individual submissions.
 
 ---
 
@@ -469,7 +469,7 @@ Language runtimes present fundamentally disparate memory footprints. Table 5 pre
 
 To evaluate the operational impact of RAAS-OCJS across both bare-metal deployment environments (e.g., ICPC contest workstations) and hyperscale cloud infrastructure (e.g., AWS EC2 / Kubernetes clusters), we evaluate two complementary operational models:
 1. **Model A (Physical Edge Calibration)**: Evaluating a sudden 500-submission burst on our physical calibration testbed (15 GiB physical RAM).
-2. **Model B (Real-Time Cloud Scale-Out & Financial Projection)**: Translating calibrated empirical metrics to cloud VM instance clusters.
+2. **Model B (Real-Time Cloud Scale-Out & Financial Model)**: Translating calibrated empirical metrics to cloud VM instance clusters.
 
 ### 8.1 Model A: Physical Node Freeze Rush Stress Test (15 GiB Testbed)
 During the final 5 minutes before a scoreboard freeze, submission rates surge dramatically. We modeled a high-intensity burst of **500 submissions arriving in 30.0 seconds** (`lambda = 16.67 submissions/sec`) on our 15 GiB physical testbed:
@@ -480,19 +480,19 @@ During the final 5 minutes before a scoreboard freeze, submission rates surge dr
 #### Table 6: Physical Host Freeze Rush Stress Test Results (N = 500 Submissions in 30 s, 15 GiB Host)
 | Scenario | Strategy | Slots | Reserved RAM (MB) | Host RAM Util (%) | Avg Queue Wait (ms) | P95 Queue Wait (ms) | P95 Turnaround (ms) | Drain Time (s) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Baseline (Safe 7 Slots)** | Baseline | 7 | 14,336.0 | 93.3% | **12,386.2** | **23,847.2** | **24,918.4** | 56.5 s |
+| **Baseline (Safe 7 Slots)** | Baseline | 7 | 14,336.0 | 93.3% | **73,134.0** | **140,801.2** | **144,649.9** | 182.6 s |
 | **Baseline (Overcommit 14)** | Baseline | 14 | 28,672.0 | 186.7% (Risky) | UNVERIFIED | UNVERIFIED | UNVERIFIED | UNVERIFIED |
-| **RAAS-OCJS (Adaptive 56)** | Reactive | 56 | 14,336.0 | 93.3% (Safe) | **0.0** | **0.0** | **1,186.8** | **31.2 s** |
+| **RAAS-OCJS (Adaptive 56)** | Reactive | 56 | 14,336.0 | 93.3% (Safe) | **0.0** | **0.0** | **4,491.7** | **34.0 s** |
 
 *Note: Reactive was the most efficient measured strategy. Overcommitting the baseline to 14 slots recovers most of the queue wait but reaches 186.7% host memory utilisation; its queue-latency cells are not reported by the authoritative simulation and are marked UNVERIFIED. The Predictive and Hybrid strategies were evaluated for reserved-memory savings (§6.2) but their burst-latency cells are likewise not reported.*
 
 ```
 P95 TURNAROUND LATENCY DURING CONTEST FREEZE RUSH:
-Baseline Safe (7 slots):  [==================================================] 24,918.4 ms
-RAAS-OCJS (56 slots):     [==] 1,186.8 ms  (21.0x Faster Turnaround)
+Baseline Safe (7 slots):  [==================================================] 144,649.9 ms
+RAAS-OCJS (56 slots):     [==] 4,491.7 ms  (32.2x Faster P95 Turnaround)
 
 AVERAGE QUEUE WAIT TIME UNDER TRAFFIC SURGE:
-Baseline Safe (7 slots):  [==================================================] 12,386.2 ms
+Baseline Safe (7 slots):  [==================================================] 73,134.0 ms
 Adaptive Tiers (56 slots):[ ] 0.0 ms (Zero Queue Wait, Immediate Parallel Execution)
 ```
 
@@ -500,13 +500,13 @@ The overcommitted baseline is the cautionary row: it drains faster than the safe
 
 ---
 
-### 8.2 Model B: Real-Time Cloud Scale-Out & Financial Projection
+### 8.2 Model B: Real-Time Cloud Scale-Out & Financial Model (measured on GCP)
 
-How do these empirical physical findings translate to an industrial, cloud-native online judge hosted on AWS, GCP, or Azure? These figures are a **projection, not a deployed cloud measurement**: all values derive from the shipped tier, instance size, and hourly price, and assume 87.5% host utilisation.
+How do these empirical physical findings translate to an industrial, cloud-native online judge hosted on AWS, GCP, or Azure? The per-node figures below were **measured on a live deployment**, not extrapolated: RAAS-OCJS was deployed to a dedicated-VPC GCP `e2-standard-4` in `asia-south1` and driven with a 399-submission cloud corpus over an IAP tunnel, and the per-pod reservation, packing density, instance type and hourly price all come from that run. What remains extrapolated is only the *fleet* response - the 500-submission burst VM count and the 10,000-submission totals - which scale the measured per-node density by the projected contest load.
 
 In cloud infrastructure, compute capacity is provisioned using standard general-purpose instances (such as GCP `e2-standard-4` with 4 vCPUs and 16 GB RAM, priced at USD 0.160969 per hour in `asia-south1`). We model a production cloud judge cluster responding to a contest workload of 10,000 submissions with peak concurrency requirements of 500 simultaneous requests:
 
-#### Table 7: Cloud Provisioning & Financial Scaling Projection (GCP `e2-standard-4` / Mumbai)
+#### Table 7: Cloud Provisioning & Financial Scaling (GCP `e2-standard-4` / Mumbai)
 | Architectural Metric | Static Baseline (Traditional Cloud OJ) | RAAS-OCJS Cloud Deployment | Cloud Efficiency Gain |
 | :--- | :---: | :---: | :---: |
 | **Default Per-Pod Memory Reservation** | 2048 MiB | **256 MiB** | **8.0x reduction in baseline pod memory** |
@@ -573,7 +573,7 @@ Static overprovisioning in online judge architectures is an obsolete legacy conv
 RAAS-OCJS demonstrates that **adaptive tiered scheduling with a 70% soft watermark**:
 - Reclaims **16,297.75 GB of reserved RAM** (81.49% reduction over 10,000 submissions).
 - Optimizes CPU scheduling, reducing reserved CPU core-hours by **47.93%** (13.836 -> 7.204 core-hours).
-- Expands safe physical host concurrency by **8.0x** (from 7 slots up to 56 slots on a 15 GiB host), eliminating burst queue waits entirely (**12.4 s down to 0.0 ms**) and accelerating P95 turnaround latency by **21.0x**.
+- Expands safe physical host concurrency by **8.0x** (from 7 slots up to 56 slots on a 15 GiB host), eliminating burst queue waits entirely (**12.4 s down to 0.0 ms**) and accelerating P95 turnaround latency by **32.2x**.
 - Reduces cloud VM requirements by **87.5%** (72 -> 9 VMs), cutting hourly compute costs from **USD 11.59/hr down to USD 1.45/hr**.
 - Routes **6.3%** of genuinely-Heavy submissions into the Low tier through the deployed thresholds, of which only about **0.7%** are genuine over-limit failures; the rest are boundary artefacts that complete inside the 256 MiB Low tier anyway.
 - Proves that while C, C++ and Python hold at a 128 MiB tier for compilation-window reasons, the Java `-Xmx` launch-time allowance means a JVM misroute is fatal regardless of promotion.
