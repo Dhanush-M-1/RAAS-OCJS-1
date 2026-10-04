@@ -11,6 +11,8 @@ judge as root**. That shape is a hard requirement, not a preference: the judge w
 containers. Serverless platforms (Cloud Run, Cloud Functions, App Engine, GKE Autopilot)
 withhold one or both, so they cannot host it. See
 [`deploy/README.md`](../deploy/README.md:6) for the full rationale.
+> All commands below use `raas-ocjs` as the project ID and `asia-south1-a` as the zone.
+> Substitute your own values.
 
 ---
 
@@ -292,6 +294,32 @@ terraform output -raw ssh_command
 
 ## 7. Run the deploy script and verify
 
+### 7.1 Prime SSH first
+
+The first `gcloud compute ssh` to a new instance is what makes the GCE guest agent create
+your Linux account and install your key. Until that has happened, every SSH call fails.
+
+`deploy.sh` polls the VM over SSH and discards each attempt's output
+([`deploy.sh`](../deploy/deploy.sh:47)), so "SSH is not ready yet" and "the bootstrap is
+still running" look identical: it prints a dot every 20 seconds
+([`deploy.sh`](../deploy/deploy.sh:56)) until the 40-minute deadline, then fails with
+*"bootstrap did not finish within 40 minutes"* ([`deploy.sh`](../deploy/deploy.sh:55)) —
+even if the bootstrap completed long before.
+
+```bash
+gcloud compute ssh raas-judge --zone=asia-south1-a --project=raas-ocjs \
+  --tunnel-through-iap --command='echo ssh-ready'
+```
+
+Seeing `ssh-ready` means the account exists. Only then continue.
+
+> The dots printed by `deploy.sh` are a heartbeat, not a progress bar. Each one is 20
+> seconds of "no answer yet". It is safe to Ctrl+C at any point — the bootstrap runs on
+> the VM independently, and re-running `deploy.sh` re-enters the same wait loop. See §10
+> if it does not advance.
+
+### 7.2 Run it
+
 From the `deploy/` directory (one level up from `terraform/`):
 
 ```bash
@@ -408,57 +436,228 @@ disabled.
 
 ## 9. Run the benchmark experiment
 
-The judge accepts `POST /submit`; the repository's harness is
-[`benchmarks/raas_benchmark.py`](../benchmarks/raas_benchmark.py:1). The harness default
-`JUDGE_URL` is a LAN address, so you **must override it**.
+The judge accepts `POST /submit`; the harness is
+[`benchmarks/raas_benchmark.py`](../benchmarks/raas_benchmark.py:1). It defaults to a LAN
+`JUDGE_URL`, so you must override it, and it sends no auth header unless
+`RAAS_AUTH_TOKEN` is exported ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:105)).
 
-The cleanest arrangement is to run the harness **on the VM**, against `127.0.0.1:3000`,
-so no wide-area latency contaminates the measured end-to-end times. SSH in first, then:
+Run it **on the VM, against `127.0.0.1:3000`**. That keeps the IAP tunnel's round-trip
+latency out of `e2e_request_to_verdict_ms`, which otherwise inflates that column by
+roughly 130 ms per request. §9.6 covers the laptop route if you prefer it for interactive
+checks.
+
+### 9.1 Subcommands
+
+| Command | What it does | Needs network? |
+| --- | --- | --- |
+| `preflight` | Checks deps, judge reachability, the three images, cgroup v2 | no |
+| `probe` | Five verdict probes: AC / WA / RE / TLE / MLE from ground truth | no |
+| `run` | Submits the saved corpus across all four strategies | no |
+| `simulate` | Re-runs the 10,000-submission macro sim + burst from the measured CSV | no |
+| `all` | `run` → `simulate` (skips `fetch` because the corpus is committed) | no |
+| `fetch` | Rebuilds the corpus from HuggingFace | **yes** — not needed here |
+
+`--limit` defaults to **0**, i.e. the whole corpus
+([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1633)). Plain `run` **is** the full
+400-submission experiment; there is no separate mode to enable.
+
+### 9.2 Prepare the VM for the harness
 
 ```bash
-# On the VM
-cd /opt/raas
-python3 -m venv .benchvenv && . .benchvenv/bin/activate
-pip install requests
+gcloud compute ssh raas-judge --zone=asia-south1-a --project=raas-ocjs \
+  --tunnel-through-iap
+```
 
-# Back up the committed result CSVs first: the harness writes fixed filenames
+On the VM:
+
+```bash
+# The checkout is root-owned (the bootstrap cloned it as root), so take it.
+sudo chown -R "$USER":"$USER" /opt/raas
+cd /opt/raas
+
+# docker CLI access so preflight can see the runtime images. Reconnect afterwards.
+sudo usermod -aG docker "$USER"
+
+# The bootstrap does NOT install python3-venv. Without it, `python3 -m venv` fails
+# with "ensurepip is not available". sudo does not help - the package is missing.
+sudo apt-get update
+sudo apt-get install -y python3-venv python3-pip
+
+# Back up the committed CSVs: the harness writes fixed filenames.
 cp -r benchmarks/results benchmarks/results.laptop-baseline
 
-export JUDGE_URL=http://127.0.0.1:3000
-export BENCH_SEED=42
-export LIGHT_TIER_MB=256
-
-# 1. Preflight — judge reachable, images present, cgroup v2 detected
-python3 benchmarks/raas_benchmark.py preflight
-
-# 2. Five verdict probes — proves AC/WA/RE/TLE/MLE paths all fire
-python3 benchmarks/raas_benchmark.py probe
-
-# 3. A short run before committing to the full corpus
-python3 benchmarks/raas_benchmark.py run --limit 5
+# Python environment for the harness.
+python3 -m venv .benchvenv
+. .benchvenv/bin/activate
+pip install requests
 ```
 
-For the full scientific run, see
-[`docs/GCP_DEPLOYMENT_PLAN.md`](GCP_DEPLOYMENT_PLAN.md:597) §8. The short version:
+> **Alternative with no venv.** The harness's only runtime dependency is `requests`
+> ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:76)). `sudo apt-get install -y
+> python3-requests`, then invoke `python3 benchmarks/raas_benchmark.py ...` with the
+> system interpreter and skip the venv entirely.
 
-- **Stratum A** — the 100 committed CodeContests submissions × 4 strategies = 400 runs.
-  These exercise correctness, routing and CFS accounting, but peak at ~53 MB, **far below
-  the 179.2 MiB watermark**, so they produce **zero promotions**.
-- **Stratum B** — the 6 synthetic heavy programs × 4 strategies = 24 runs. This is where
-  **promotion actually fires** (expected: 8 promoting runs). Without stratum B you have
-  spent cloud budget validating only the least controversial part of the system.
-
-Pull the results and logs off the VM when finished:
+Reconnect for the docker group change to take effect, then **re-export the environment**
+— shell variables do not survive a new session:
 
 ```bash
-gcloud compute scp --recurse --tunnel-through-iap \
-  raas-judge:/opt/raas/benchmarks/results ./results-from-gcp \
-  --zone=asia-south1-a --project=raas-ocjs
+cd /opt/raas
+[ -d .benchvenv ] && . .benchvenv/bin/activate
 
-gcloud compute ssh raas-judge --zone=asia-south1-a --project=raas-ocjs \
-  --tunnel-through-iap --command='sudo journalctl -u raas-judge --no-pager' \
-  > raas-judge-server.log
+export JUDGE_URL=http://127.0.0.1:3000
+export RAAS_AUTH_TOKEN=$(sudo awk -F= '/^RAAS_AUTH_TOKEN=/{print $2}' /etc/raas/judge.env)
+export BENCH_SEED=42
+export LIGHT_TIER_MB=256
 ```
+
+`RAAS_AUTH_TOKEN` is mandatory. `deploy.sh` set the same secret in `/etc/raas/judge.env`
+([`deploy.sh`](../deploy/deploy.sh:100)); without it in the harness's environment every
+submission returns 401 ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:234)).
+
+### 9.3 Validate before spending time
+
+```bash
+python3 benchmarks/raas_benchmark.py status
+python3 benchmarks/raas_benchmark.py preflight
+python3 benchmarks/raas_benchmark.py probe
+```
+
+Two results that are **expected and not failures**:
+
+- `preflight` reports `FAIL datasets` and therefore exits non-zero. That dependency is
+  used only by `fetch` ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1519)); you
+  are not fetching. Check the other sections instead.
+- `probe` may report an MLE mismatch. The harness itself notes this is a finding about
+  tier routing, not necessarily a bug
+  ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1503)).
+
+### 9.4 Run the full experiment — detached
+
+**`run` writes its CSV only once, after the entire loop completes**
+([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1065)). If the SSH session drops
+mid-run, all 400 submissions are lost. Always run it detached:
+
+```bash
+nohup python3 benchmarks/raas_benchmark.py run > ~/run-full.log 2>&1 &
+echo "PID $!"
+tail -f ~/run-full.log          # Ctrl+C here is safe; it does not kill the run
+```
+
+`sudo apt-get install -y tmux` and running inside `tmux new -s bench` works equally well
+(detach with `Ctrl+B` then `D`; reattach with `tmux attach -t bench`).
+
+**Expect 20–40 minutes.** The observed rate is roughly 3–4 s per submission across
+100 submissions × 4 strategies.
+
+**Expect `tier_promoted = False` on essentially every row, with `Live_Promotions = 0`.**
+That is correct, not a failure: the committed corpus peaks near 53 MB against the
+179.2 MiB watermark. This run validates correctness, routing and CFS accounting at scale —
+it is **not** evidence of promotion. For promotion evidence see §9.7.
+
+Then regenerate the derived CSVs from the new measurements:
+
+```bash
+tail ~/run-full.log             # confirm the run completed first
+python3 benchmarks/raas_benchmark.py simulate
+```
+
+`simulate` reads the empirical CSV ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1083))
+and rewrites the four derived files
+([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1269),
+[`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1307),
+[`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1347),
+[`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1413)).
+`python3 benchmarks/raas_benchmark.py all` does `run` → `simulate` in one step.
+
+> **Caveat on the simulation output.** `simulate` still derives capacity from the
+> hardcoded laptop `HOST_SPECS` ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:128))
+> and cloud price from an AWS `c6i.4xlarge`
+> ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:143)). Present its slot-count and
+> cloud-projection figures as **analytic projections**, never as GCP measurements.
+
+### 9.5 Collect the artifacts
+
+Consolidate on the VM first, so a single copy grabs everything:
+
+```bash
+mkdir -p ~/raas-artifacts
+cp -r /opt/raas/benchmarks/results ~/raas-artifacts/
+sudo journalctl -u raas-judge --no-pager > ~/raas-artifacts/raas-judge-server.log
+sudo cp /var/log/raas-bootstrap.log ~/raas-artifacts/
+sudo chown "$USER" ~/raas-artifacts/raas-bootstrap.log
+ls -la ~/raas-artifacts
+```
+
+The `>` redirection runs in your shell before `sudo`, so the log ends up owned by you.
+
+> **Every `gcloud` command runs on your laptop, never on the VM.** `exit` the SSH session
+> first. Running `gcloud` inside the VM fails with *"You do not currently have an active
+> account selected"*, and the remedy it suggests — `gcloud auth login` — would write your
+> personal credentials to a machine other people may share. Do not do that. If several
+> people use the VM, give each their own IAM binding
+> (`roles/iap.tunnelResourceAccessor` and `roles/compute.instanceAdmin.v1`) and let each
+> authenticate on their own laptop.
+
+Then, **from the laptop** (note the remote path is the second argument):
+
+```bash
+exit    # leave the VM
+
+gcloud compute scp --recurse --tunnel-through-iap \
+  raas-judge:/home/USER/raas-artifacts ./raas-artifacts \
+  --zone=asia-south1-a --project=raas-ocjs
+```
+
+Replace `USER` with your VM username (run `whoami` on the VM). Sanity-check the copy: the
+empirical CSV should hold 400 data rows.
+
+```bash
+wc -l raas-artifacts/results/real_dataset_empirical_runs_tier256.csv   # expect 402
+```
+
+### 9.6 Alternative: run from your laptop
+
+Open the tunnel in a terminal that stays running:
+
+```bash
+gcloud compute start-iap-tunnel raas-judge 3000 \
+  --local-host-port=localhost:3000 \
+  --zone=asia-south1-a --project=raas-ocjs
+```
+
+Then, in another terminal:
+
+```bash
+cd /path/to/RAAS-OCJS
+python3 -m venv .benchvenv && . .benchvenv/bin/activate && pip install requests
+export JUDGE_URL=http://localhost:3000
+export RAAS_AUTH_TOKEN=$(gcloud compute ssh raas-judge \
+  --zone=asia-south1-a --project=raas-ocjs --tunnel-through-iap \
+  --command='sudo cat /etc/raas/judge.env' | sed 's/RAAS_AUTH_TOKEN=//')
+python3 benchmarks/raas_benchmark.py probe
+```
+
+Convenient for interactive checks, but the tunnel's latency enters
+`e2e_request_to_verdict_ms`, and `preflight`'s docker section fails locally because the
+runtime images exist only on the VM. Do not publish numbers gathered this way.
+
+### 9.7 Promotion evidence
+
+The committed corpus cannot demonstrate promotion. The promotion proof comes from a
+synthetic sweep that walks memory targets across the watermark and writes
+`promotion_suite.csv`, carrying `tier_promoted`, `promotion_time_ms` and
+`allocated_memory_bytes` per case. A correct deployment shows the boundary behaviour:
+
+- a **170 MiB** target does **not** promote (`tier_promoted = False`);
+- a **185 MiB** target **does** promote, with `promotion_time_ms` around 3 s;
+- `allocated_memory_bytes` flips from `268435456` (the 256 MiB Low tier) to `0`
+  (uncapped) on promotion.
+
+If you need the synthetic heavy programs inside a measured `run`, note that
+`--with-synthetic` exists only on `fetch`
+([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1627)), which requires the
+`datasets` package and HuggingFace access. See
+[`docs/GCP_DEPLOYMENT_PLAN.md`](GCP_DEPLOYMENT_PLAN.md:597) §8.3 for the options.
 
 ---
 
@@ -524,6 +723,113 @@ gcloud compute ssh raas-judge --zone=asia-south1-a --project=raas-ocjs \
 Look for `[FATAL]` lines. Common causes: the cgroup probe failing, the Docker driver not
 being `systemd`, or the repository URL not being publicly clonable.
 
+### `deploy.sh` prints dots forever and never advances
+
+The dots are a heartbeat, not progress — one every 20 s
+([`deploy.sh`](../deploy/deploy.sh:56)). The loop cannot distinguish "bootstrap still
+running" from "SSH is failing", because both are swallowed by `2>/dev/null`
+([`deploy.sh`](../deploy/deploy.sh:47)), and it only gives up at a 40-minute deadline
+([`deploy.sh`](../deploy/deploy.sh:55)).
+
+Ctrl+C is safe — it does not touch the VM, and re-running `deploy.sh` only re-enters the
+same wait loop; it does **not** restart the bootstrap. Diagnose by reading the log
+directly:
+
+```bash
+gcloud compute ssh raas-judge --zone=asia-south1-a --project=raas-ocjs \
+  --tunnel-through-iap --command='sudo tail -40 /var/log/raas-bootstrap.log'
+```
+
+- **Ends with `bootstrap complete`** → the VM is finished. Just re-run `./deploy.sh`. Do
+  **not** run `rerun_bootstrap.sh`, which would needlessly repeat the ten-minute build.
+- **Ends mid-step with a stale timestamp** → the bootstrap died silently.
+  [`startup.sh.tftpl`](../deploy/terraform/startup.sh.tftpl:10) runs under
+  `set -euo pipefail` but echoes `[FATAL]` only for its three explicit checks, so any
+  other failing command aborts it without a marker `deploy.sh` can detect. Fix the cause,
+  then recover with [`rerun_bootstrap.sh`](../deploy/rerun_bootstrap.sh:1).
+- **Still growing, with a `cargo build` or `docker build` running** → it is working.
+  Ctrl+C the local script and watch the log.
+
+The most common underlying cause on a fresh instance is that SSH was never primed, so
+every probe failed. See §7.1.
+
+### `gcloud` says "You do not currently have an active account selected"
+
+You ran a `gcloud` command **on the VM**. A prompt like `user@raas-judge` means you are
+inside the instance, where no gcloud account is configured. `exit` back to your laptop and
+run it there.
+
+Do **not** run `gcloud auth login` on the VM, even though that is what the error suggests.
+It stores your personal OAuth credentials in `~/.config/gcloud/` on a machine other people
+may share, and GCE grants passwordless `sudo` to every SSH user. Give collaborators their
+own IAM bindings instead.
+
+### Unknown host key prompt when copying files
+
+`gcloud compute scp` and `gcloud compute ssh` create the SSH key and record the host on
+first use. If the tunnel is not open or the instance is stopped, they fail rather than
+prompt. Confirm the instance is `RUNNING`:
+
+```bash
+gcloud compute instances list --project=raas-ocjs
+```
+
+### "The virtual environment was not created successfully because ensurepip is not available"
+
+The bootstrap does not install `python3-venv`
+([`startup.sh.tftpl`](../deploy/terraform/startup.sh.tftpl:40)). `sudo` does not help —
+the missing piece is the package, not the permission:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-venv python3-pip
+sudo rm -rf .benchvenv          # may hold root-owned files from a `sudo` attempt
+python3 -m venv .benchvenv
+```
+
+Installing `python3-requests` and using the system interpreter instead is a valid
+alternative that needs no venv.
+
+### `Permission denied` writing under `/opt/raas`
+
+The bootstrap cloned the repository as root, so the checkout is root-owned. Fix it once:
+
+```bash
+sudo chown -R "$USER":"$USER" /opt/raas
+```
+
+### preflight reports `FAIL docker not usable`
+
+Your SSH user is not in the `docker` group. Run `sudo usermod -aG docker "$USER"`, then
+**reconnect** — a group change does not apply to an existing session.
+
+### preflight reports `FAIL datasets`
+
+Expected and harmless. That dependency is used only by `fetch`
+([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1519)); the committed corpus needs
+no network. It is the sole reason preflight exits non-zero.
+
+### Every submission returns 401
+
+The judge enforces the shared secret and the harness is not sending it. Export it into the
+harness's environment:
+
+```bash
+export RAAS_AUTH_TOKEN=$(sudo awk -F= '/^RAAS_AUTH_TOKEN=/{print $2}' /etc/raas/judge.env)
+```
+
+The harness adds the `x-raas-token` header only when that variable is set
+([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:105),
+[`raas_benchmark.py`](../benchmarks/raas_benchmark.py:224)). Remember that environment
+variables do not survive a new SSH session.
+
+### A long `run` finishes but there is no CSV
+
+`run` writes its output only after the whole loop completes
+([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1065)). If the SSH session dropped
+and killed the process, the work is lost. Run it detached with `nohup` or inside `tmux` —
+see §9.4.
+
 ### `start-iap-tunnel` fails with "failed to connect to backend (port 3000)"
 
 The IAP firewall rule for `tcp/3000` is missing. Terraform creates it
@@ -571,22 +877,57 @@ cd deploy/terraform
 terraform destroy         # type "yes"
 ```
 
-This removes the VM, the VPC, the subnet and the firewall rules. **Stopping the VM is not
-enough** — a stopped instance keeps billing for its boot disk
-([`deploy/README.md`](../deploy/README.md:118)).
+This removes the VM, the VPC, the subnet and the firewall rules, and deletes the boot disk
+along with the instance.
 
-Verify nothing is left behind:
+**Stopping is not the same as destroying.** `gcloud compute instances stop` halts compute
+charges but the boot disk keeps billing ([`deploy/README.md`](../deploy/README.md:118)) —
+roughly Rs 3.5/month for 30 GiB `pd-balanced`. That is a reasonable way to pause, but a
+finished campaign should be destroyed. A stopped instance can be destroyed without
+starting it first.
+
+Verify nothing billable is left:
 
 ```bash
-gcloud compute instances list --project=raas-ocjs
-gcloud compute disks list --project=raas-ocjs
+gcloud compute instances list  --project=raas-ocjs
+gcloud compute disks list      --project=raas-ocjs
+gcloud compute addresses list  --project=raas-ocjs
+gcloud compute snapshots list  --project=raas-ocjs
 ```
+
+The first two must be empty. The last two should be empty as well — an unattached reserved
+IP and a snapshot both bill, and neither is created by this deployment.
+
+A `gcloud compute networks list` will still show a `default` VPC with four `default-allow-*`
+rules. **Those are not yours.** GCP creates them in every new project, they cost nothing,
+and the absence of any `raas-judge-*` name is the confirmation that your resources are
+gone.
+
+If `terraform destroy` fails — for example because the state is missing — delete the
+resources directly:
+
+```bash
+gcloud compute instances delete raas-judge \
+  --zone=asia-south1-a --project=raas-ocjs --delete-disks=all
+gcloud compute firewall-rules delete \
+  raas-judge-allow-iap-ssh raas-judge-allow-iap-judge --project=raas-ocjs
+gcloud compute networks subnets delete raas-judge-subnet \
+  --region=asia-south1 --project=raas-ocjs
+gcloud compute networks delete raas-judge-net --project=raas-ocjs
+```
+
+The two `google_project_service` resources use `disable_on_destroy = false`
+([`main.tf`](../deploy/terraform/main.tf:30)), so the Compute and IAP APIs stay enabled
+after destroy. That is intentional and free — an enabled API with no resources costs
+nothing, as does the billing account remaining linked to the project.
 
 ---
 
 ## 13. Appendix — command cheat sheet
 
 ```bash
+# ===== On the LAPTOP =====
+
 # --- One-time setup ---
 gcloud auth login
 gcloud auth application-default login
@@ -598,25 +939,67 @@ cp terraform.tfvars.example terraform.tfvars      # then edit project_id
 terraform init
 terraform apply
 cd ..
+
+# Prime SSH FIRST, or deploy.sh will spin without explaining why
+gcloud compute ssh raas-judge --zone=asia-south1-a --project=raas-ocjs \
+  --tunnel-through-iap --command='echo ssh-ready'
+
 ./deploy.sh
 
 # --- Operate ---
-terraform output -raw tunnel_command              # copy/paste to start the IAP tunnel
+terraform -chdir=terraform output -raw tunnel_command   # copy/paste to open the IAP tunnel
 gcloud compute ssh raas-judge --zone=asia-south1-a --project=raas-ocjs --tunnel-through-iap
-sudo journalctl -u raas-judge -f
-sudo systemctl restart raas-judge
-
-# --- Verify the mechanism on the VM ---
-sudo /opt/raas/deploy/cgroup_probe.sh
-stat -fc %T /sys/fs/cgroup                        # expect: cgroup2fs
-docker info --format '{{.CgroupDriver}}'          # expect: systemd
-docker images | grep judge-runtime                # expect: 3 images
-
-# --- Re-run bootstrap without recreating the VM ---
-cd deploy && ./rerun_bootstrap.sh
 
 # --- Destroy ---
 cd deploy/terraform && terraform destroy
+
+# ===== On the VM (after the ssh command above) =====
+
+# --- One-time prep ---
+sudo chown -R "$USER":"$USER" /opt/raas
+cd /opt/raas
+sudo usermod -aG docker "$USER"                   # reconnect afterwards
+sudo apt-get update && sudo apt-get install -y python3-venv python3-pip
+cp -r benchmarks/results benchmarks/results.laptop-baseline
+python3 -m venv .benchvenv && . .benchvenv/bin/activate && pip install requests
+
+export JUDGE_URL=http://127.0.0.1:3000
+export RAAS_AUTH_TOKEN=$(sudo awk -F= '/^RAAS_AUTH_TOKEN=/{print $2}' /etc/raas/judge.env)
+export BENCH_SEED=42 LIGHT_TIER_MB=256
+
+# --- Verify the mechanism ---
+sudo /opt/raas/deploy/cgroup_probe.sh
+stat -fc %T /sys/fs/cgroup                        # expect: cgroup2fs
+docker info --format '{{.CgroupDriver}}'          # expect: systemd
+sudo journalctl -u raas-judge -f
+sudo systemctl restart raas-judge
+
+# --- Run the experiment ---
+python3 benchmarks/raas_benchmark.py status
+python3 benchmarks/raas_benchmark.py preflight    # "FAIL datasets" is expected
+python3 benchmarks/raas_benchmark.py probe
+
+# Full 400-submission run - detached, because the CSV is written only at the very end
+nohup python3 benchmarks/raas_benchmark.py run > ~/run-full.log 2>&1 &
+tail -f ~/run-full.log                            # Ctrl+C here is safe
+python3 benchmarks/raas_benchmark.py simulate     # only after the run completes
+
+# --- Collect artifacts ---
+mkdir -p ~/raas-artifacts
+cp -r /opt/raas/benchmarks/results ~/raas-artifacts/
+sudo journalctl -u raas-judge --no-pager > ~/raas-artifacts/raas-judge-server.log
+sudo cp /var/log/raas-bootstrap.log ~/raas-artifacts/
+exit
+
+# ===== Back on the LAPTOP =====
+
+# Copy the artifacts down (remote path is the second argument; USER is your VM username)
+gcloud compute scp --recurse --tunnel-through-iap \
+  raas-judge:/home/USER/raas-artifacts ./raas-artifacts \
+  --zone=asia-south1-a --project=raas-ocjs
+
+# Re-run the bootstrap without recreating the VM
+cd deploy && ./rerun_bootstrap.sh
 ```
 
 ### File map for this deployment
