@@ -20,9 +20,27 @@ table or figure in the paper, or it does not run.
 
 - **Class:** `Conference_paper/IEEEtran.cls`, `\documentclass[conference]{IEEEtran}`.
 - **Template:** `Conference_paper/RAAS_OCJS.tex` (blank; to be written from scratch).
-- **Length:** IEEE conference, typically 6–8 pages including references, two-column.
+- **Length: 6 pages including references, two-column. This is now fixed** and it is the binding
+  constraint on the whole design — see I.6 for the element budget it forces.
 - **Title and abstract may not contain math or special symbols.**
 - All template guidance text must be removed before submission.
+
+## I.1b Authorship (confirmed from the current PDF)
+
+Five authors in the IEEE block, in this order:
+
+| # | Name | Email | Affiliation |
+|---|---|---|---|
+| 1 | Bharath Aashish R | bharathaashish@gmail.com | Dept. of Computer Science & Engineering, Easwari Engineering College, Chennai |
+| 2 | Dhanush M | dhanush.m.0808@gmail.com | Dept. of Computer Science & Engineering, Easwari Engineering College, Chennai |
+| 3 | Hemanthkumar K | hemanthkumar2k04@gmail.com | Dept. of Computer Science & Engineering, Easwari Engineering College, Chennai |
+| 4 | Iniyaa P | iniyaapaari@gmail.com | Dept. of Computer Science & Engineering, Easwari Engineering College, Chennai |
+| 5 | Indumathy P | indumathy.p@eec.srmrmp.edu.in | Assistant Professor, Dept. of CSE, Easwari Engineering College, Chennai |
+
+The template provides six blocks, so one is unused. Two things to settle before submission: the
+guide's affiliation line currently reads "Assistant Professor, Dept. of CSE" while the others read
+"Dept. of Computer Science & Engineering" — normalise the wording; and confirm the guide's position
+is intended (last is conventional, second is also common).
 
 ## I.1a Testbed
 
@@ -248,13 +266,86 @@ Every claim → experiment → element → section. Nothing may appear in the pa
 
 | Claim | Experiments | Tables | Figures | Paper section |
 |---|---|---|---|---|
-| C1 | E1 | T1, T2 | F2 | Motivation / workload characterisation |
-| C2 | E4, E6 | T5 | F5 | Mechanism and safety |
-| C3 | E2, E3 | T3, T4, T9 | F3, F4, F6 | Results |
-| C4 | E5 | T6 | — | Prediction analysis |
-| **C5** | **E9** | **T10–T13** | **F7** | **Predictive model and its training data** |
-| — | E7 | T7 | — | Boundary / limits |
-| — | E8 | T8 | — | Deployment |
+| C1 | E1 | T1 | F2 | Motivation / workload characterisation |
+| C2 | E4, E6 | T3 | F4 | Mechanism and safety |
+| C3 | E2, E3 | T2, T5 | F3 | Results |
+| C4 | E5 | T4 | — | Prediction analysis |
+| C5 | E9 | T4 | — | Predictive model and its training data |
+| — | E7 | supplementary | — | Boundary / limitations |
+| — | E8 | not tabled | — | Deployment |
+
+**Every table and figure is now accounted for.** T1–T5 and F1–F4 are the paper; everything else in I.3
+and I.4 is either merged into them or listed as cut in I.6. If an experiment produces data that does not
+land in one of these nine elements, that data belongs in supplementary material, not in the paper.
+
+## I.6 Six-page element budget
+
+**The page limit is the binding constraint.** A 6-page two-column IEEE paper holds roughly 4.5 pages of
+body text plus about one page of tables and figures, so at most **5 tables and 4 figures** can survive.
+Thirteen tables and seven figures cannot. The budget below is therefore part of the design, not a
+post-hoc cut: **the harness should emit the merged shapes directly**, so nothing has to be assembled by
+hand at submission time.
+
+### The five tables that ship
+
+| ID | Title | Merged from | Source | Carries |
+|---|---|---|---|---|
+| **T1** | Corpus and demand distribution | T1 + T2 | E1 | C1 |
+| **T2** | Configuration comparison | T3 + T4 | E2, E3 | C3 |
+| **T3** | Correctness envelope of promotion | T5 | E4, E6 | C2 |
+| **T4** | Predictive model: corpus, performance, routing | T10 + T11 + T12 + T13 | E9 | C5 |
+| **T5** | Headline summary | T9 | all | C1–C5 |
+
+**T1** merges the corpus composition and the demand percentiles into one table: the corpus description
+becomes a caption line, and the body is the percentile table with the sub-25/256/1024/2048 shares.
+**T2** merges the static sweep and the policy comparison, because they answer the same question from two
+sides; feasibility (`mem_failures == 0`) becomes the column that separates valid cells from invalid ones.
+**T4** merges four tables into one, because a model's performance is meaningless without its corpus and
+its error decomposition — they are one argument, not three.
+
+### The four figures that ship
+
+| ID | Title | Source | Carries | Notes |
+|---|---|---|---|---|
+| **F1** | System architecture | static | context | half-column, compact |
+| **F2** | Demand distribution | E1 | C1 | the single most important figure |
+| **F3** | Tension frontier | E2, E3 | C3 | throughput vs memory-caused failures, adaptive marked |
+| **F4** | Promotion safety | E4, E6 | C2 | latency distribution + the allocation-rate race threshold |
+
+### What is cut, and where it goes
+
+| Element | Why cut | Where it goes |
+|---|---|---|
+| T8 cloud provisioning | E8 may not run, and the numbers are derived rather than measured | a short paragraph in the deployment section, or the journal version |
+| F5 promotion latency (standalone) | folded into F4 | — |
+| F6 burst response | cannot be driven end-to-end without E3; a simulated burst is not publishable | dropped unless E3 makes it measurable, in which case it displaces F4 |
+| F7 model evaluation (ROC) | the AUC/F1 numbers live in T4; the ROC curves are the least informative panel | the trade-off panel (misroute vs share routed High) survives as a small inset in T4 |
+| Per-language breakdowns | T4 carries per-language misroute in one column group | supplementary material |
+| Threshold sensitivity (standalone) | three rows; fits as a T4 sub-block | — |
+
+### Page allocation
+
+| Section | Pages |
+|---|---|
+| Title, abstract, index terms | 0.25 |
+| Introduction and motivation | 0.75 |
+| Theoretical model | 0.75 |
+| System implementation | 0.75 |
+| Results (T1–T4, F1–F4) | 2.25 |
+| Deployment and cost | 0.4 |
+| Boundary analysis and limitations | 0.35 |
+| Conclusion and references | 0.5 |
+
+### Consequences for the experiments
+
+1. **T2 is the expensive table and the one that must be right.** It carries C3, and it is the only table
+   where the static sweep and the adaptive policies meet. Every cell must come from a real run.
+2. **F3 must be plotted from E2 and E3 together**, or the frontier has nothing to mark adaptive against.
+3. **T4 must be emitted by E9 as one table**, not assembled from four training reports.
+4. **Nothing may be added to the paper without removing something.** If a fifth figure is needed, one of
+   F1/F4 goes — F1 is the least load-bearing, since the mechanism is describable in prose.
+5. **Supplementary material is the overflow valve.** Per-language detail, the full 30-cell sweep and the
+   ROC curves belong there, and the paper should say so explicitly rather than compress them to illegibility.
 
 ---
 
@@ -385,7 +476,7 @@ contest are the ideal addition; if unavailable, say so.
 **Controls.** Re-run a sample of light submissions at 256 MiB to confirm the tier does not change the
 measured peak for submissions that fit.
 
-**Paper element.** T1, T2, F2.
+**Paper element.** T1 (merged), F2.
 
 **Kill condition.** If `p50` is not small relative to 2048 MiB, or >10% of submissions exceed 512 MiB,
 C1 is false. **Report it either way** — this is the foundation and it must be honest.
@@ -407,7 +498,7 @@ C1 is false. **Report it either way** — this is the foundation and it must be 
 
 **Controls.** Identical corpus, host and arrival schedule in every cell. Fixed seed. Record host state.
 
-**Paper element.** T3, F4.
+**Paper element.** T2 (merged), F3.
 
 **Kill condition.** If some static `limit` achieves both zero memory-caused failures **and** adaptive's
 throughput, C3 is false and the paper must say so. Run this early precisely because it can end the
@@ -434,7 +525,7 @@ have `mem_failures == 0`; a row with failures is invalid and is reported as such
 **Metrics.** The headline is **submissions/hour at the same RAM and the same correctness**. Secondary:
 peak admitted concurrency, mean and peak reservation, promotion rate.
 
-**Paper element.** T4, F3, F6, and the T9 headline row for C3.
+**Paper element.** T2 (merged), F3, and the T5 headline row for C3.
 
 **Kill condition.** If adaptive's sustainable rate is not materially above the best feasible static
 cell, C3 fails. If raising admission with 256 MiB tiers produces *any* memory-caused failure, C2 fails.
@@ -467,7 +558,7 @@ a tiering failure and must not be counted as one.
 **Metrics.** Verdict agreement with the oracle; `oom_kill` delta per submission; promotion latency
 distribution; the allocation rate (MiB/s) at which the race is first lost.
 
-**Paper element.** T5, F5.
+**Paper element.** T3 (merged), F4.
 
 **Kill condition.** Any case that fails under `reactive`, passes under `baseline`, has a memory-caused
 verdict and a non-zero `oom_kill` delta → C2 is false. Report the rate threshold either way; if
@@ -496,7 +587,7 @@ prediction, not of the model.
 **Metrics.** False-heavy rate (wasted reservation), false-light rate (correctness risk), reservation
 held, and the reservation floor prediction cannot go below.
 
-**Paper element.** T6.
+**Paper element.** T4 (merged) — the oracle arm's reservation floor is a row in the model table.
 
 **Kill condition.** If the oracle arm matches reactive, C4 is false and the honest conclusion is
 "this classifier is under-trained", not "prediction is insufficient". Report either outcome.
@@ -518,7 +609,7 @@ write the promotion?
 **Controls.** **Both directions are required** — a non-promoting policy at the same demand must fail,
 and a promoting policy must succeed. One direction alone proves nothing.
 
-**Paper element.** T5 (mechanism rows); supports F5.
+**Paper element.** T3 (mechanism rows); supports F4.
 
 **Kill condition.** Promotion firing away from the watermark, or any `oom_kill` delta in a promoting
 case, falsifies the mechanism.
@@ -538,7 +629,7 @@ more).
 **Metrics.** Failure kind per (language, tier): cgroup OOM vs in-process runtime abort, with exit code
 and stderr marker.
 
-**Paper element.** T7.
+**Paper element.** Supplementary — the tier floor is stated in the limitations section rather than tabled.
 
 **Kill condition.** If no language fails at 128 MiB for a structural reason, the floor claim is wrong
 and the achievable ratio is 16×, not 8×.
@@ -558,7 +649,8 @@ difference is the number of VMs.
 
 **Metrics.** Sustained rate, correctness, reservation, coordination overhead.
 
-**Paper element.** T8 — **measured rows only**. Any derived row must be marked `D` in the caption.
+**Paper element.** Not tabled. Cloud cost is a short paragraph in the deployment section; any derived
+figure is marked `D`.
 
 **Kill condition.** If the advantage vanishes with coordination, state the result as single-VM only.
 
@@ -670,8 +762,10 @@ and boundary artefacts, with the measurement basis stated.
 
 ### Paper element
 
-T10, T11, T12, T13, F7. Feeds E5 (the oracle arm needs the measured peaks, and the C4 argument needs
-the model's quality established first).
+**T4 (merged)** — corpus, model performance and routing errors in one table, with the
+misroute-vs-share-routed-High trade-off as a small inset (F7 does not survive as a standalone figure;
+see I.6). Feeds E5: the oracle arm needs the measured peaks, and the C4 argument needs the model's
+quality established first.
 
 ### Kill condition
 
@@ -812,13 +906,16 @@ comparisons need a stable, smaller workload. Reporting both sizes explicitly is 
 **Obligation.** T3 and T4 must state the subset size, and F2 must state that it is drawn from the full
 corpus.
 
-## D5 — Venue and authorship must be fixed before drafting. **OPEN — needs HK.**
+## D5 — Six pages, five authors. **RESOLVED.**
 
-The template has six author blocks. This is the one decision I cannot take, because it determines the
-page budget that constrains how many of T1–T13 and F1–F7 survive.
+**Page limit: 6 including references.** Authorship confirmed from the current PDF (see I.1b): Bharath
+Aashish R, Dhanush M, Hemanthkumar K, Iniyaa P, and Indumathy P as Assistant Professor — five of the
+template's six blocks.
 
-**What is needed:** the target venue, its page limit and deadline; and the author list in order. The team
-is four (HK, Bharath, Dhanush, Iniyaa) plus guide Mrs. Indumathy P., which is five of six slots.
+**Consequence.** The 6-page limit is now the binding constraint on the entire design. I.6 sets the
+element budget: **five tables and four figures**. The other eight tables and three figures are either
+merged into those, cut, or moved to supplementary material. This is settled before drafting rather than
+discovered at submission.
 
-**Default if undecided:** assume a **6-page** limit, which forces T3/T4 to be merged and F4 to be
-combined with F6. I will build to 8 pages and flag what to cut for 6, rather than the reverse.
+**Still to settle (not blocking):** whether the guide's affiliation wording is normalised to match the
+other four authors, and whether her position in the block is intended as written.
