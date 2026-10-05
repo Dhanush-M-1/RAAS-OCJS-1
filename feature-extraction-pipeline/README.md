@@ -55,9 +55,9 @@ The 26 core features plus the `parse_error_flag` quality flag and the `submissio
 - **`arithmetic_density`**: `total_arithmetic_ops / max(source_loc, 1)`
 - **`subscript_2d_ratio`**: `total_2d_subscripts / max(total_subscripts, 1)`
 - **`recursion_intensity`**: `recursive_call_count / max(total_functions, 1)`
-- **`log_max_constant`**: $\log_{10}(\max(\text{max\_integer\_constant}, 1))$
-- **`log_ast_nodes`**: $\ln(1 + \text{ast\_node\_count})$
-- **`log_source_chars`**: $\ln(1 + \text{source\_chars})$
+- **`log_max_constant`**: $\log_{10}$ of `max(max_integer_constant, 1)`
+- **`log_ast_nodes`**: $\ln$ of `1 + ast_node_count`
+- **`log_source_chars`**: $\ln$ of `1 + source_chars`
 
 > These are defined in [`train_advanced_xgboost.py`](../model-training/train_advanced_xgboost.py), **not** emitted by the Rust extractor — the extractor's CSV contains the 26 core feature columns plus the `parse_error_flag` quality flag and the `submission_id` / `language` / `label` metadata columns (30 columns total).
 
