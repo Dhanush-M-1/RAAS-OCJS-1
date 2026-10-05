@@ -60,6 +60,7 @@ any one being weakened, and must say so if one falls.
 | **C2** | Light-start + promotion is **safe** — it never causes a memory-caused failure that worst-case provisioning would have prevented | T5 | any such failure |
 | **C3** | Adaptive sustains **strictly more concurrent graded work at the same RAM and the same correctness** than any static configuration | T3, T4, F4 | best static cell matches adaptive |
 | **C4** | Prediction **alone** cannot match reactive, because peak demand is not determined by source | T6 | the oracle arm matches reactive |
+| **C5** | The routing model is reproducible and its errors are quantified — trained on measured-memory labels, evaluated problem-disjoint, and reported as a misroute rate decomposed into genuine over-limit failures and boundary artefacts | T10–T13, F7 | the model cannot be retrained to the reported numbers, or the error decomposition does not survive |
 
 **The framing to avoid.** Do not present "% of bytes saved" as the headline. Bytes are a proxy and a
 reviewer will discount them. The headline is **throughput at fixed RAM and fixed correctness**.
@@ -167,6 +168,50 @@ that is arithmetic rather than measured must be marked as such in the caption or
 supports it and a pointer to its table. This is the only table allowed to mix sources, and every cell
 must cite where it came from.
 
+**T10 — Training corpus.** *Source: E9.* Required: the model is only interpretable next to its labels.
+| Column | Meaning |
+|---|---|
+| source | dataset name and provenance |
+| submissions | total rows |
+| unique_problems | distinct problems |
+| label_rule | the exact rule that produced Light/Heavy |
+| label_basis | **measured** memory vs **heuristic** (length/difficulty) |
+| light / heavy | class counts and ratio |
+| ambiguous_band | rows dropped because the label was not decidable |
+| parse_errors | rows filtered by the feature extractor, and the rate |
+| on_disk | corpus size |
+
+**T11 — Model performance.** *Source: E9.* One row per trained model.
+| Column | Meaning |
+|---|---|
+| model | unified multi-language, or specialized C++/Java/Python/C |
+| features | feature-vector length |
+| cv_accuracy | grouped cross-validation accuracy |
+| test_accuracy, test_f1, test_auc | held-out, problem-disjoint |
+| threshold | the decision threshold shipped in `server/src/predict.rs` |
+| train_submissions / train_problems | split size |
+| test_submissions / test_problems | split size |
+
+**T12 — Routing error decomposition.** *Source: E9.* The C5 evidence, and the table that keeps the
+model honest.
+| Column | Meaning |
+|---|---|
+| model_set | original / retrained / +allocation features |
+| misroute_cpp, misroute_java, misroute_python, misroute_c | genuinely-Heavy routed to Low, per language |
+| misroute_all | aggregate |
+| routed_high_pct | share sent to the High tier (the cost side) |
+| misroutes_under_tier | of the misroutes, how many still fit inside the Low tier's limit |
+| genuine_over_limit | the remainder — the real failures |
+| note | the measurement basis for the memory figure |
+
+**T13 — Threshold sensitivity.** *Source: E9.* Shows accuracy-optimal is the wrong objective.
+| Column | Meaning |
+|---|---|
+| threshold_set | deployed / each model's CV-optimal / misroute-minimising |
+| misroute_all | resulting misroute rate |
+| routed_high_pct | resulting High-tier share |
+| degenerate | true if the set collapses to routing almost everything High |
+
 ## I.4 Every figure the paper will contain
 
 **F1 — System architecture.** Tiers, the cgroup files, the watermark, the promotion path, the four
@@ -192,6 +237,11 @@ quantitative bound.
 **F6 — Burst response.** Queue wait and turnaround CDFs under a fixed burst schedule, **measured
 end-to-end**. If the burst cannot be driven end-to-end, the figure is omitted and the claim is not made.
 
+**F7 — Model evaluation.** ROC curves for the unified and specialized models on the problem-disjoint
+test split, with each shipped threshold marked, plus a secondary panel plotting misroute rate against
+the share routed High as the threshold sweeps — the trade-off that shows why accuracy-optimal
+thresholds are the wrong objective. Plotted from the trainer's own outputs, not re-derived.
+
 ## I.5 Traceability
 
 Every claim → experiment → element → section. Nothing may appear in the paper without a row here.
@@ -202,6 +252,7 @@ Every claim → experiment → element → section. Nothing may appear in the pa
 | C2 | E4, E6 | T5 | F5 | Mechanism and safety |
 | C3 | E2, E3 | T3, T4, T9 | F3, F4, F6 | Results |
 | C4 | E5 | T6 | — | Prediction analysis |
+| **C5** | **E9** | **T10–T13** | **F7** | **Predictive model and its training data** |
 | — | E7 | T7 | — | Boundary / limits |
 | — | E8 | T8 | — | Deployment |
 
@@ -431,7 +482,8 @@ promotion only fails above a high rate, that is a bounded, statable limitation.
 **Hypothesis.** Even with perfect prediction, predictive-only cannot match reactive, because it must
 reserve worst-case for everything it flags.
 
-**Procedure.** Three arms on the same corpus:
+**Procedure.** Three arms on the same corpus (see **E9** for what the shipped classifier is and how it
+was validated):
 1. `predictive` with the shipped classifier;
 2. `predictive` with an **oracle label** (the true peak from E1) — the best possible predictor;
 3. `reactive`.
@@ -449,7 +501,9 @@ held, and the reservation floor prediction cannot go below.
 **Kill condition.** If the oracle arm matches reactive, C4 is false and the honest conclusion is
 "this classifier is under-trained", not "prediction is insufficient". Report either outcome.
 
-**Effort.** Medium. Requires E1's true peaks as labels.
+**Effort.** Medium. Requires E1's true peaks as labels, and **must follow E9** — the C4 argument only
+holds once the model's own quality has been established, otherwise "prediction is insufficient" is
+indistinguishable from "this model is under-trained".
 
 ## E6 — Mechanism verification at the kernel → supports **C2**, T5
 
@@ -511,6 +565,126 @@ difference is the number of VMs.
 **Effort.** Large, and the only experiment that provisions more than one billable instance. Record the
 hourly and monthly figure and the teardown command in the paper's deployment section.
 
+## E9 — Predictive model: training data, evaluation and deployment → **C5**, T10–T13, F7
+
+The classifier is half the design, and the paper currently has no element that describes what it was
+trained on, how it was validated, or how its errors decompose. This experiment produces that, and it is
+a prerequisite for E5 — you cannot argue that prediction is insufficient without first establishing that
+the prediction is as good as it can reasonably be.
+
+### E9.1 Feature extraction (fixed; do not change without re-running everything)
+
+The judge does not load a model at run time. The trained model is **compiled into the Rust binary**, so
+the feature vector is a compile-time contract with four independent sites that must agree:
+
+| Site | What it pins |
+|---|---|
+| `feature-extraction-pipeline/src/features.rs` | the 26 base AST features |
+| `model-training/train_advanced_xgboost.py` (`get_feature_cols`) | 26 base + 10 engineered |
+| `model-training/regenerate_models.sh` | the expected vector length |
+| `server/src/predict.rs` | the order the judge builds the vector in |
+
+**26 base AST features:** nesting_depth, max_loop_depth, total_loops, cyclomatic_complexity,
+is_recursive, recursive_call_count, large_alloc_flag, alloc_size_max, alloc_size_total, alloc_sites,
+alloc_unknown_sites, has_fast_io, has_heavy_datastructure, has_modulo_arithmetic, has_bitmask_ops,
+has_graph_adjacency, total_functions, total_calls, total_subscripts, total_2d_subscripts,
+total_arithmetic_ops, max_integer_constant, ast_node_count, ast_depth, source_loc, source_chars.
+
+**10 engineered:** loop_density, call_density, subscript_density, branch_density, arithmetic_density,
+subscript_2d_ratio, recursion_intensity, log_max_constant, log_ast_nodes, log_source_chars.
+
+**4 language one-hots** (unified model only): lang_C, lang_C++, lang_Java, lang_Python.
+
+So the specialized models take **36** features and the unified model takes **40**. A mismatch between
+these sites produces *silently wrong scores*, not an error — which is why the plan requires a length
+assertion at each site and a test that the four agree.
+
+### E9.2 Training corpus
+
+Two data eras exist and they are not interchangeable. The label basis is the thing that matters:
+
+| Era | Source | Size | Unique problems | Label rule | Label basis |
+|---|---|---|---|---|---|
+| CodeNet | `iNeil77/CodeNet` parquet | 164,686 submissions (Light 100,000 / Heavy 64,686) | 2,520 | Light < 25 MiB; Heavy ≥ 100 MiB; the 25–100 MiB band **dropped** | **measured** memory |
+| CodeContests | `deepmind/code_contests` | 30,000 files (5,000 Light / 5,000 Heavy per language) | 148 | Light if `difficulty ≤ 3 or len(code) < 650`; Heavy if `difficulty ≥ 5 or len(code) ≥ 1200` | **length heuristic** |
+
+The label change was necessary and the paper must say why: over a 12.7M-row CodeNet scan, source length
+explains only **7–18%** of the variance of measured memory (Python r = 0.4278, C++ r = 0.3648,
+C r = 0.3107, Java r = 0.2615). A length threshold is a weak proxy for the thing being predicted, and no
+program in the CodeContests corpus exceeds 50 MiB measured, so its "Heavy" class is not what the tier's
+limit actually tests.
+
+**Decision (adopted): CodeNet is the training corpus.** CodeContests is retained only as the historical
+era and is never used to train a model the paper reports.
+
+### E9.3 Training and validation protocol
+
+- **Split:** 80/20 `GroupShuffleSplit` **grouped by problem**, seed 42 → 125,159 train submissions over
+  1,930 problems, 28,687 test submissions over 483 problems. Grouping is what makes the test measure
+  generalisation to *unseen problems* rather than memorisation.
+- **Cross-validation:** `GroupKFold` on the training split, again grouped by problem.
+- **Class imbalance:** `scale_pos_weight = negatives / positives`, computed per model.
+- **Threshold selection:** Youden's J (sensitivity + specificity − 1) from the CV ROC curve, clamped to
+  [0.2, 0.8] to prevent degenerate edges.
+- **Models:** one unified multi-language model (40 features) plus specialized C++, Java, Python and C
+  models (36 features).
+- **Filtering:** parse-error rows are removed before training (10,840 rows, 6.6%, on CodeNet).
+
+### E9.4 Evaluation — misroute, not accuracy
+
+**Accuracy is the wrong metric.** The Light majority dominates it, so a model that routes everything Low
+scores well and is dangerous. The metric that matters is the **misroute rate**: a genuinely-Heavy program
+sent to the Low tier.
+
+**And misroute alone is also the wrong objective**, because it is minimised by routing everything High.
+The paper must report **misroute against the share routed High** — the trade-off — not misroute alone.
+
+**The error decomposition is required.** A "Heavy" label means ≥ 100 MiB, but the Low tier's hard limit
+is 256 MiB. A program measured between those two numbers is labelled Heavy, counted as a misroute, and
+yet completes inside Low anyway. So the raw misroute rate must be split into genuine over-limit failures
+and boundary artefacts, with the measurement basis stated.
+
+### E9.5 Procedure
+
+1. Rebuild the corpus with `extract_codenet.py` at a fixed seed; record the manifest hash.
+2. Extract features with the Rust extractor; assert the vector length matches at all four sites.
+3. Train with `train_advanced_xgboost.py`; record the model parameters, seed and device.
+4. Run `evaluate_routing.py` through the **deployed** thresholds, not the trainer's own.
+5. Produce T10–T13 and F7.
+6. Run `regenerate_models.sh` and confirm the judge binary rebuilds and its routing matches the
+   Python evaluation on a sample of submissions.
+
+### E9.6 Controls
+
+- **Leakage.** The split is grouped by problem; verify no problem appears in both sides, and verify no
+  test-case, expected-output or timing signal reaches the feature vector. Feature extraction reads
+  **source only**.
+- **Device.** GPU and CPU runs are not bit-identical (unified AUC 0.9502 vs 0.9503) because float
+  reduction order differs. Record which was used, and do not mix them within a reported table.
+- **Threshold provenance.** The judge ships fixed `THRESHOLD_*` constants. State which models those
+  thresholds were tuned for, because applying thresholds tuned for one model to another is exactly the
+  error that produced the deployed set.
+- **End-to-end agreement.** A model that scores correctly in Python but is compiled incorrectly into
+  Rust is a silent failure. The paper must be able to show the judge's verdict path agrees with the
+  offline evaluation.
+
+### Paper element
+
+T10, T11, T12, T13, F7. Feeds E5 (the oracle arm needs the measured peaks, and the C4 argument needs
+the model's quality established first).
+
+### Kill condition
+
+If the reported numbers cannot be reproduced from the committed corpus, manifest and seed, C5 fails and
+no routing claim may be made. If the error decomposition does not survive the 256 MiB reframing — i.e.
+most misroutes are genuine over-limit failures — then the routing story changes materially and must be
+restated.
+
+### Effort
+
+Medium. One training run on the reference hardware; the expensive part is the corpus scan.
+
+
 ---
 
 # Part V — Measurement hygiene
@@ -569,7 +743,8 @@ repeated trials and a reported distribution, never a single sample.
 | 6 | **E3** adaptive vs static under dynamic admission | the central experiment |
 | 7 | **E5** oracle-prediction comparison | settles C4 as a property of prediction |
 | 8 | **E7** tier floor | bounds the supported range |
-| 9 | **E8** multi-VM scaling | only if the single-VM result holds |
+| 9 | **E9** model training and evaluation | must precede E5's argument; produces the model's own evidence |
+| 10 | **E8** multi-VM scaling | only if the single-VM result holds |
 
 **Stop conditions.**
 - E1 shows demand is not bimodal → stop, re-scope the whole project.
@@ -583,16 +758,67 @@ anything outside the repository's current tree.
 
 ---
 
-# Part VIII — Decisions required
+# Part VIII — Decisions
 
-1. **Admission control is not memory-aware, and E3 needs it to be.** Changing `MAX_CONCURRENT` from a
-   constant to a memory-derived bound is a code change to `server/src/queue.rs`. In scope?
-2. **Synthetic heavy submissions.** May they appear in headline results, given they were authored to
-   trigger the mechanism? Recommendation: permitted in T5 (mechanism) and F5; excluded from T1–T4 and
-   F2/F4 unless T1 separates them as a distinct source.
-3. **How hard to push "beats existing judges".** Doing it properly means modelling or citing real
-   DOMjudge / DMOJ / Judge0 configurations in E2, rather than one worst-case baseline. In scope?
-4. **Corpus scale.** E1 wants ≥1000 submissions across ≥100 problems; E2–E3 multiply that by up to 30
-   cells. Is there a compute budget, or do we size the corpus to what one machine can run overnight?
-5. **Authorship and venue.** The template has six author blocks. Who is on the paper, in what order,
-   and which venue's page limit and deadline are we targeting? This fixes the length budget in I.1.
+All five are now **decided**, and the decisions are binding on the experiments above. Change one only
+by changing this section.
+
+## D1 — Admission control becomes memory-derived. **ADOPTED.**
+
+`MAX_CONCURRENT` changes from a constant to a runtime policy: `fixed(N)` for the static sweep in E2, and
+`memory_derived(reserve_mib)` for E3, which admits while `(available_ram - reserve) >= tier_reservation`.
+
+**Why.** With a fixed 16, the instance sits at roughly a quarter of its RAM and memory never becomes the
+binding constraint, so the adaptive mechanism has nothing to act on and the central claim stays analytic.
+E3 does not exist without this change.
+
+**Scope.** One module (`server/src/queue.rs`) plus configuration plumbing. The `fixed(N)` mode preserves
+current behaviour exactly, so the change is not a rewrite.
+
+**Obligation.** Every result must report which admission policy was active, because it dominates all
+other effects.
+
+## D2 — Synthetic heavy submissions are confined to mechanism experiments. **ADOPTED.**
+
+Permitted in **T5 and F5** (the correctness envelope), where they are legitimate adversarial inputs.
+**Excluded** from T1–T4 and F2/F4 (workload characterisation and results), unless T1 carries them as a
+separate source row and F2 renders them distinguishably.
+
+**Why.** They were written to trigger the watermark. Measuring how often the watermark triggers on inputs
+authored to trigger it is circular, and a reviewer will say so. Used as mechanism probes they are
+defensible; used as workload evidence they are not.
+
+## D3 — Anchor the comparison to real judge configurations, without deploying one. **ADOPTED.**
+
+E2 keeps the 30-cell static sweep, and the paper adds a short subsection stating each mainstream judge's
+**documented** configuration — per-submission limit and worker model for DOMjudge, DMOJ and Judge0 — and
+maps each onto the cell of the sweep that corresponds to it.
+
+**Why.** The sweep is far better than a single worst-case strawman, but unanchored it invites "we don't
+provision 2048 MiB, we do X". Mapping real configurations onto sweep cells makes the comparison concrete
+at the cost of a few hours of reading. Deploying and benchmarking a real judge is not worth the effort
+for a conference paper and mostly re-measures someone else's system.
+
+## D4 — Corpus scale: decouple characterisation from the sweep. **ADOPTED.**
+
+- **E1** uses the **full corpus** (target ≥1000 submissions across ≥100 problems) — a single pass, so it
+  is cheap.
+- **E2 and E3** use a **fixed subset** of that corpus, stated in the paper, with a fixed seed.
+
+**Why.** E2 × E3 is up to 34 full passes; multiplying that by 1000 submissions on one VM is days of
+billable wall-clock. The distribution statistics need the large sample; the throughput and correctness
+comparisons need a stable, smaller workload. Reporting both sizes explicitly is honest and costs nothing.
+
+**Obligation.** T3 and T4 must state the subset size, and F2 must state that it is drawn from the full
+corpus.
+
+## D5 — Venue and authorship must be fixed before drafting. **OPEN — needs HK.**
+
+The template has six author blocks. This is the one decision I cannot take, because it determines the
+page budget that constrains how many of T1–T13 and F1–F7 survive.
+
+**What is needed:** the target venue, its page limit and deadline; and the author list in order. The team
+is four (HK, Bharath, Dhanush, Iniyaa) plus guide Mrs. Indumathy P., which is five of six slots.
+
+**Default if undecided:** assume a **6-page** limit, which forces T3/T4 to be merged and F4 to be
+combined with F6. I will build to 8 pages and flag what to cut for 6, rather than the reverse.
