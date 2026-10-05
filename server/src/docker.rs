@@ -172,7 +172,7 @@ fn get_tier_limits(tier: &Tier) -> Vec<String> {
 /// code cache, GC structures - measured at roughly 40-60 MiB for these
 /// submissions. Giving the whole tier to `-Xmx` lets the JVM grow into that
 /// overhead and be OOM-killed anyway; 75% leaves ~64 MiB at the default 256 MiB
-/// tier. This is the sizing FINAL_RESULTS section 7 recommends.
+/// tier. This is the sizing the tier-floor experiment (TEST_PLAN E7) is expected to confirm.
 pub const JAVA_HEAP_PCT_OF_LOW_TIER: u64 = 75;
 
 /// Heap ceiling in MiB for a JVM submission, for the tier it is being started in.

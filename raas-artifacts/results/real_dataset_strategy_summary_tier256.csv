@@ -1,5 +1,0 @@
-Strategy,Total_Submissions,Total_Allocated_GB,Total_Used_GB,Total_Wasted_GB,Wasted_Percentage,Memory_Saved_vs_Baseline_GB,Memory_Savings_Pct,Total_CPU_Core_Hours,Avg_Queue_Wait_ms,Avg_E2E_Latency_ms,Avg_Turnaround_ms,P95_Turnaround_ms,Live_Promotions,Promotion_Rate_Pct,Tier_MiB
-Baseline,10000,20000.0,86.51,19913.49,99.57,0.0,0.0,19.796,37905.62,3567.59,41473.21,214378.55,0,0.0,256
-Predictive,10000,16031.0,86.11,15944.89,99.46,3969.0,19.84,17.829,0.0,3658.74,3658.74,5715.97,0,0.0,256
-Reactive,10000,2500.0,85.51,2414.49,96.58,17500.0,87.5,9.984,0.0,3598.8,3598.8,5072.31,0,0.0,256
-Hybrid,10000,16031.0,86.24,15944.76,99.46,3969.0,19.84,16.545,0.0,3385.27,3385.27,4981.96,0,0.0,256

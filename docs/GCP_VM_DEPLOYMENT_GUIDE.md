@@ -1,5 +1,14 @@
 # Deploying RAAS-OCJS on a GCP VM — Step-by-Step Operator Guide
 
+> **NOTE (harness withdrawn).** The benchmark harness referenced throughout this guide
+> (`benchmarks/raas_benchmark.py`) has been removed from the repository, together with its
+> result CSVs. Sections that invoke it will fail until the replacement harness is written.
+> Everything about provisioning the VM, the cgroup proof, the token, the IAP tunnel and the
+> troubleshooting catalogue remains valid. The replacement harness and the corpora it must
+> use are specified in [`docs/TEST_PLAN.md`](TEST_PLAN.md).
+
+
+
 This guide walks an operator from **a bare Google account with no billing set up** all the
 way to **a verified, running judge that promotes a memory-heavy submission live**. Every
 step is derived from what is actually committed under [`deploy/`](../deploy/README.md:1) —
@@ -653,11 +662,10 @@ synthetic sweep that walks memory targets across the watermark and writes
 - `allocated_memory_bytes` flips from `268435456` (the 256 MiB Low tier) to `0`
   (uncapped) on promotion.
 
-If you need the synthetic heavy programs inside a measured `run`, note that
-`--with-synthetic` exists only on `fetch`
-([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1627)), which requires the
-`datasets` package and HuggingFace access. See
-[`docs/GCP_DEPLOYMENT_PLAN.md`](GCP_DEPLOYMENT_PLAN.md:597) §8.3 for the options.
+The benchmark harness this section used to reference has been withdrawn, along with its
+results. The replacement harness, its interface and the corpora it must use are specified in
+[`docs/TEST_PLAN.md`](TEST_PLAN.md) — in particular E0 (instrumentation and configuration) and
+E1 (corpus construction).
 
 ---
 

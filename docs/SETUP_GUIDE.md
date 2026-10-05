@@ -190,17 +190,11 @@ cargo build
 
 ## 6. Real-Dataset Benchmark Harness (Optional)
 
-[`benchmarks/raas_benchmark.py`](../benchmarks/raas_benchmark.py) is the single test entry point. It drives the live judge with real competitive-programming problems streamed from HuggingFace, caches the corpus under `benchmarks/dataset/`, and writes `benchmarks/results/real_dataset_*_tier256.csv`.
-
-Subcommands: `preflight`, `probe`, `fetch`, `run`, `simulate`, `all`, `status`. Slot counts are derived, never hardcoded: on the 15 GiB reference host (14336 MiB usable) the baseline safe count is `floor(14336 / 2048)` = 7 slots and the adaptive count is `floor(14336 / 256)` = 56 slots (see the environment knobs below).
-
-**Requirements:** a running judge server (see §3) and the Python dependencies from `model-training/requirements.txt`.
-
-```bash
-# IMPORTANT: the harness defaults to a LAN IP (http://192.168.0.111:3000),
-# not localhost. Override it to point at your local server:
-JUDGE_URL=http://localhost:3000 python3 benchmarks/raas_benchmark.py all
-```
+No benchmark harness is currently committed. The former single-entry-point harness and its results
+were withdrawn because the corpus, cloud target and promotion path changed repeatedly and the
+published figures no longer corresponded to any single run. The replacement experimental programme
+is specified in [`TEST_PLAN.md`](TEST_PLAN.md), which also defines the harness interface the new
+script must expose (see TEST_PLAN E0).
 
 Environment knobs:
 

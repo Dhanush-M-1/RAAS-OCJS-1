@@ -93,44 +93,9 @@ RAAS-OCJS evaluates four distinct scheduling paradigms against a common containe
 
 ---
 
-## 3. Comparative Benchmark Summary
+> **Results withdrawn.** The experimental numbers formerly in this section have been
+> removed. They were produced by a harness whose corpus, cloud target and promotion path
+> changed repeatedly, and the figures no longer correspond to any single run. A fresh
+> experimental programme is specified in [`docs/TEST_PLAN.md`](TEST_PLAN.md); results will be
+> re-derived and re-published against it. Do not cite numbers from this repository's history.
 
-| Scenario | Baseline | Predictive | Reactive | Hybrid |
-|---|:---:|:---:|:---:|:---:|
-| Light Task (Prefix Sums) | Over-allocates (Heavy) | Optimal (Light) | Optimal (Light) | Optimal (Light) |
-| Large DP (Knapsack, 171-203 MB) | Heavy from start | Depends on AST | Starts Light $\rightarrow$ Promotes live | Starts Light $\rightarrow$ Promotes live |
-| CPU Intensive ($O(V^3)$ APSP) | Heavy from start | Classified from AST | Starts Light (1 CPU, **never promotes** — trigger is memory-only) | Classified or Monitored (promotion is memory-only) |
-| Heavy STL (priority_queue-heavy) | Over-allocates (Heavy) | Identified (`has_heavy_datastructure`) | Light (fits in 256 MB) | Optimal (Light, 256 MB) |
-
-### 3.1 Measured Results (2026-09-30)
-
-**Live runs** (100 CodeContests submissions × 4 strategies, 256 MiB tier): 400/400 AC, 0 transport failures, 394 s total, 0 promotions. Started high 246 / low 154. Peak container usage: min 6.3 MB, mean 14.4 MB, median 10.6 MB, max 53.0 MB; 95.8% under 25 MB.
-
-**Macro simulation** (N = 10,000, seed 42, 43 real problems, 256 MiB):
-
-| Strategy | Slots | Memory allocated | Wasted | CPU core-hours | Avg queue wait | P95 turnaround | Saved vs Baseline |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Baseline | 7 | 20000.0 GB | 99.4% | 5.622 | 2.36 ms | 1448.52 ms | — |
-| Predictive | 56 | 14860.25 GB | 99.21% | 4.827 | 0.0 | 1434.47 ms | 5139.75 GB (25.7%) |
-| Reactive | 56 | 2500.0 GB | 95.33% | 2.876 | 0.0 | 1471.9 ms | 17500.0 GB (87.5%) |
-| Hybrid | 56 | 14860.25 GB | 99.2% | 4.831 | 0.0 | 1418.68 ms | 5139.75 GB (25.7%) |
-
-Live promotions were 0 for all four strategies. Slots are derived, never hardcoded: the baseline-safe count is `floor(14336/2048) = 7` and the adaptive count is `floor(14336/256) = 56` on a 15 GiB host (14336 MiB usable).
-
-**Burst stress** (N = 500, 30 s window, 15 GiB host): Baseline (safe, 7 slots) avg queue wait 20966.9 ms, P95 turnaround 41794.6 ms, drain 73.8 s, util 93.3%. Baseline overcommitted (14 slots) wait 2996.0 ms, P95 7401.6 ms, drain 37.7 s, util 186.7%. Predictive (56 slots) wait 0.0, P95 1421.8 ms, drain 31.3 s. Reactive wait 0.0, P95 1482.8 ms, drain 31.2 s. Hybrid wait 0.0, P95 1394.5 ms, drain 31.3 s.
-
-**Cloud projection**: per-pod memory 2048 → 256 MiB (8.0x); CPU 2.0 → 1.0 vCPU (2.0x); density on e2-standard-4 (Mumbai, 14 GiB usable) 7 → 56 pods (8.0x); 500-sub burst fleet 72 → 9 VMs (87.5%); cost at USD 0.160969/hr 11.59 → 1.45 USD/hr (10.14 saved, 87.5%); reserved RAM over 10,000 submissions 20,000.0 → 3,702.25 GB (81.49%).
-
-**Per-language** (Baseline → Reactive, shares among the simulated submissions):
-
-| Language | n | Share | Avg CPU (ms) | Avg wall (ms) | P95 (ms) | Waste |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| C++ | 6743 | 67.4% | 115.7 → 116.4 | 1219.1 → 1216.8 | 1514.1 → 1526.8 | 99.47% → 95.87% |
-| Java | 869 | 8.7% | 811.8 → 818.3 | 3252.6 → 3264.2 | 3566.4 → 3605.8 | 97.45% → 91.29% |
-| Python | 2249 | 22.5% | 152.9 → 153.0 | 451.4 → 449.3 | 663.2 → 659.5 | 99.46% → 95.65% |
-
-All three languages save 87.5% under Reactive.
-
-**Verdict probes**: AC, WA, RE, TLE, MLE all verified from ground truth (5/5); TLE killed at ~10.03 s CPU; MLE peaks ~255.5-256.0 MB in the low tier.
-
-Source data is produced by `benchmarks/raas_benchmark.py`, which writes `benchmarks/results/real_dataset_*_tier256.csv`.

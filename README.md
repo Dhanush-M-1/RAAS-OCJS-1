@@ -76,121 +76,13 @@ flowchart TD
 
 ---
 
-## 04. Real-World Competition Benchmark Suite
+> **Results withdrawn.** The experimental numbers formerly in this section have been
+> removed. They were produced by a harness whose corpus, cloud target and promotion path
+> changed repeatedly, and the figures no longer correspond to any single run. A fresh
+> experimental programme is specified in [`docs/TEST_PLAN.md`](TEST_PLAN.md); results will be
+> re-derived and re-published against it. Do not cite numbers from this repository's history.
 
-The system includes five high-stakes competition problems modeled after **Codeforces**, **ICPC**, **LeetCode Hard**, and **AtCoder DP Contest**:
-
-1. **Range Prefix Sums & Cumulative Balance** (`Prefix Sums`, Light)
-   - $O(N + Q)$ Time · $O(N)$ Space. Evaluates Light-tier performance with zero cgroup watermark events.
-2. **0-1 Knapsack Large State Space (2D Grid DP)** (`Dynamic Programming`, Memory-Heavy)
-   - $O(N \times W)$ Time · $O(N \times W)$ Space (~200 MiB RSS). Intentionally breaches the 70% (~179.2 MiB) watermark to verify **live reactive container promotion**.
-3. **All-Pairs Shortest Path (Floyd-Warshall Algorithm)** (`Graph`, CPU-Bound)
-   - $O(V^3)$ Time · $O(V^2)$ Space ($V=100, 120$). Evaluates Predictive AST detection of triply nested loops (`max_loop_depth = 3`).
-4. **Game Tree Search (Binary Branching Recursion)** (`Game Theory`, Recursive)
-   - $O(2^N)$ Time · $O(N)$ Stack Depth ($N=30, 32$). Evaluates Tree-sitter detection of branching recursion (`is_recursive`, `recursive_call_count = 2`).
-5. **Top-K Streaming Frequencies (Hash Map + Priority Queue)** (`Streaming / Heaps`, Collections)
-   - $O(N \log K)$ Time · $O(N)$ Space ($N=30\text{k}, 50\text{k}$). Evaluates heavy STL container detection and demonstrates stable CFS CPU accounting.
-
----
-
-## 05. Key Innovations & Measurements
-
-1. **Microsecond CFS Kernel CPU Timing (`cpu.stat`)**:
-   - Rather than measuring host wall-time around `docker exec` (which adds 150–200 ms of container startup noise), the judge reads `/sys/fs/cgroup/.../cpu.stat` deltas directly from the Linux kernel scheduler.
-   - Reduces execution measurement variance from $\pm 200\%$ down to $\le \pm 4\%$.
-2. **Soft Watermark Live Migration (`memory.high`)**:
-   - Uses `memory.high = 179.2 MiB` (70% of `memory.max`) to detect pressure *before* reaching the 256 MiB hard limit (`memory.max`), preventing kernel OOM-killer panics while avoiding premature tier migration.
-   - Executes live container expansion by writing `memory.high=max` and `memory.max=max` directly to the container's host cgroup v2 directory, then issuing `docker update --memory 0 --memory-swap -1 --cpus 0` to keep the Docker daemon's view in sync, in $< 15\text{ ms}$ without dropping running processes.
-3. **Unified Allocated vs. Used Memory Tracking**:
-   - Explicitly records both the **Peak Memory Used** (actual RSS footprint) and **Memory Allocated** (assigned tier ceiling), enabling direct quantification of infrastructure savings.
-
----
-
-## 06. Experimental Results
-
-*All figures below come from the live judge on the bare-metal calibration host (Fedora 44 KDE, 15 GiB usable RAM, cgroup v2; Low tier 256 MiB; watermark 70% = 179.2 MiB), driven by the single harness [`benchmarks/raas_benchmark.py`](benchmarks/raas_benchmark.py).*
-
-### 6.1 Live corpus — 100 submissions × 4 strategies
-
-**400/400 `AC`, 0 transport failures, 394 s wall clock.** A pure CodeContests corpus contains no memory-heavy programs, so **0 promotions** fired across the whole suite.
-
-| Metric | Value |
-|---|---|
-| Runs started in the High tier | 246 |
-| Runs started in the Low tier | 154 |
-| Peak memory used — min / median / mean / max | 6.3 MB / 10.6 MB / 14.4 MB / 53.0 MB |
-| Runs under 25 MB | 383 / 400 (95.8%) |
-| Allocated per run | 256 MB (Low start) or 2048 MB (High start) |
-
-### 6.2 Verdict-path probes
-
-All five verdict paths are verified against ground truth — **AC, WA, RE, TLE, MLE (5/5)**. The TLE probe is killed by the 10 s per-case guard (~10.03 s CPU / ~10.26 s wall). The MLE probe starts in the Low tier and peaks at ~255.5–256.0 MB before the kernel OOM-kills it.
-
-### 6.3 Synthetic suite — live reactive promotion
-
-On the synthetic heavy knapsack the same program behaves differently by language, now that the JVM heap is sized from the tier:
-
-| Language | Promotion | Peak | Verdict |
-|---|:---:|---:|:---:|
-| C, C++, Python | promoted | 171–203 MB | **AC** |
-| Java (Reactive / Hybrid) | promoted `true` | 202.6 MB | **RE** |
-| Java (Predictive) | promoted `false` | 202.5 MB | **RE** |
-
-> **The JVM is not rescued by promotion.** `-Xmx` is fixed at launch (75% of the Low tier = 192 MiB), so once a Java submission is started in the Low tier it cannot grow past its launch-time heap even after the container is promoted. Reactive promotion therefore ends a genuinely oversized Java submission in `RE` instead of an `MLE` race. For JVM languages, correct **routing** (Predictive) is the mechanism that matters — the watermark alone is not enough.
-
-### 6.4 Macro contest simulation
-
-*Seeded (`BENCH_SEED=42`), N = 10,000 submissions sampled from the combined measured corpus: the 43 real problems from the 399-submission cloud run, plus the heavy/medium profiles from the 72-run bare-metal calibration, with the heavy family oversampled at a 20% stress rate. 256 MiB tier.*
-
-| Strategy | Slots | Allocated GB | Used GB | Waste | CPU core-h | Avg queue wait | P95 turnaround |
-|---|:---:|---:|---:|---:|---:|---:|---:|
-| Baseline | 7 | 20000.0 | 233.28 | 98.83% | 13.836 | 7893.85 ms | 66493.94 ms |
-| Predictive | 56 | 14429.75 | 224.55 | 98.44% | 12.173 | 0.0 ms | 4493.45 ms |
-| Reactive | 56 | 3702.25 | 207.24 | 94.40% | 7.204 | 0.0 ms | 4549.99 ms |
-| Hybrid | 56 | 15632.0 | 215.91 | 98.62% | 12.387 | 0.0 ms | 4632.54 ms |
-
-Memory saved against Baseline: **Predictive 5570.25 GB (27.85%)**, **Reactive 16297.75 GB (81.49%)**, **Hybrid 4368.00 GB (21.84%)**. Live promotions: **687 (6.87%)** under Reactive and Hybrid, **0** under Baseline and Predictive. On the 399 cloud-measured submissions alone the Reactive figure is 87.4% with zero promotions - that corpus contains no memory-heavy submissions, which is why the combined corpus is the one reported here.
-
-### 6.5 Burst stress
-
-*N = 500 submissions in a 30 s window on the 15 GiB host. Baseline safe = `floor(14336 / 2048)` = 7 slots; adaptive = `floor(14336 / 256)` = 56 slots.*
-
-| Scenario | Slots | Avg queue wait | P95 turnaround | Drain | Host RAM util |
-|---|:---:|---:|---:|---:|---:|
-| Baseline (safe) | 7 | 73134.0 ms | 144649.9 ms | 182.6 s | 93.3% |
-| Baseline (2x overcommit) | 14 | 28600.4 ms | 58982.6 ms | 93.2 s | 186.7% |
-| Predictive (adaptive) | 56 | 0.0 ms | 4520.9 ms | 34.0 s | 93.3% |
-| Reactive (adaptive) | 56 | 0.0 ms | 4491.7 ms | 34.0 s | 93.3% |
-| Hybrid (adaptive) | 56 | 0.0 ms | 4515.0 ms | 33.9 s | 93.3% |
-
-### 6.6 Cloud provisioning (measured GCP deployment)
-
-Deployed as a single `e2-standard-4` (4 vCPU, 16 GB) in `asia-south1` (Mumbai), reached only over an IAP tunnel. Not a projection.
-
-- Per-pod memory reservation: **2048 MiB → 256 MiB (8.0x)**; per-pod CPU: **2.0 → 1.0 vCPU (2.0x)**.
-- Packing density on an `e2-standard-4` (14 GiB usable): **7 → 56 concurrent pods (8.0x)**. This is a *memory-reservation* figure (`floor(14336 / 256)`), not a core count - 56 pods share 4 physical vCPUs and are time-sliced by CFS.
-- 500-submission burst fleet: **72 VMs → 9 VMs (87.5% fewer)**.
-- Cluster cost at USD 0.160969/hr per VM (verified against the Cloud Billing API): **USD 11.59/hr → USD 1.45/hr (USD 10.14/hr saved, 87.5%)**.
-- Total reserved RAM over 10,000 submissions under Reactive: **20000.0 GB → 3702.25 GB (16297.75 GB reclaimed, 81.49%)**.
-
-### 6.7 Per-language profile
-
-*256 MiB tier, Baseline → Reactive.*
-
-| Language | n | Share | Avg CPU | Waste (B → R) | Saved | Promotions |
-|---|---:|---:|---:|---:|---:|---:|
-| C++ | 5774 | 57.7% | 321.9 → 320.7 ms | 98.99% → 94.88% | 82.0% | 365 |
-| Python | 1989 | 19.9% | 472.3 → 474.5 ms | 98.77% → 94.96% | 79.7% | 177 |
-| C | 1368 | 13.7% | 40.4 → 42.3 ms | 99.14% → 93.96% | 85.1% | 38 |
-| Java | 869 | 8.7% | 811.8 → 818.3 ms | 97.45% → 91.29% | 76.7% | 107 |
-
-Raw per-cell measurements are committed under [`benchmarks/results/`](benchmarks/results/) as `real_dataset_*_tier256.csv`.
-
-Full per-language matrix, promotion traces, and threats to validity: [`docs/EXPERIMENTAL_RESULTS.md`](docs/EXPERIMENTAL_RESULTS.md).
-
----
-
-## 07. Tech Stack
+## 04. Tech Stack
 
 - **Judge Server**: Rust (Tokio, Axum, cgroups v2, Linux namespaces).
 - **AST Parsing**: Tree-sitter Rust bindings (C, C++, Java, Python).
@@ -200,21 +92,20 @@ Full per-language matrix, promotion traces, and threats to validity: [`docs/EXPE
 
 ---
 
-## 08. Documentation Index
+## 05. Documentation Index
 
 Detailed architectural and technical documentation is available in the [`docs/`](docs/) directory:
 
 - [**System Architecture** (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md): Deep dive into the AST pipeline, cgroup controllers, and dual watermark design.
 - [**Scheduling Strategies** (`docs/SCHEDULING_STRATEGIES.md`)](docs/SCHEDULING_STRATEGIES.md): Formal breakdown of Baseline, Predictive, Reactive, and Hybrid policies.
-- [**Benchmark Suite** (`docs/BENCHMARK_SUITE.md`)](docs/BENCHMARK_SUITE.md): Mathematical formulations, complexity, and test cases for all 5 competition problems.
-- [**Experimental Results** (`docs/EXPERIMENTAL_RESULTS.md`)](docs/EXPERIMENTAL_RESULTS.md): Empirical data, stability measurements, and memory savings analysis.
+- [**Test Plan** (`docs/TEST_PLAN.md`)](docs/TEST_PLAN.md): the experimental programme, and the paper elements each experiment must produce.
 - [**Setup & Developer Guide** (`docs/SETUP_GUIDE.md`)](docs/SETUP_GUIDE.md): Complete setup instructions for the judge server, the frontend, the model pipeline, and the benchmark harness.
 - [**Model Training Pipeline** (`model-training/README.md`)](model-training/README.md): Dataset extraction (CodeNet **or** CodeContests) → Rust AST feature extraction → XGBoost training → `m2cgen` transpilation into the judge binary.
 - [**Feature Extraction Pipeline** (`feature-extraction-pipeline/README.md`)](feature-extraction-pipeline/README.md): The 26 core AST features emitted by the Rust Tree-sitter extractor, plus the 10 engineered ratios added during training (36 features per language; 40 unified).
 
 ---
 
-## 09. Quick Start
+## 06. Quick Start
 
 The predictive models are **already compiled into the judge** ([`server/src/generated/`](server/src/generated/)), regenerated at 36 features (per-language) and 40 (unified) from the CodeNet measured-memory corpus, so steps 1–3 are the only ones required to *run* the system. Step 0 is only needed if you want to retrain on a different dataset (e.g. the earlier CodeContests corpus).
 
@@ -266,17 +157,13 @@ npm run dev
 ```
 Navigate to `http://localhost:5173` to launch the multi-strategy visualizer.
 
-### 4. Benchmark Against the Real Dataset (optional)
-With the server still running, in a third terminal:
-```bash
-# The harness defaults to a LAN IP (http://192.168.0.111:3000) — override it:
-JUDGE_URL=http://localhost:3000 python3 benchmarks/raas_benchmark.py all
-```
-`benchmarks/raas_benchmark.py` is the single entry point (`preflight`, `probe`, `fetch`, `run`, `simulate`, `all`, `status`). It streams real problems from `deepmind/code_contests`, validates each solution, caches the corpus under `benchmarks/dataset/`, and writes `benchmarks/results/real_dataset_*_tier256.csv`. Useful knobs: `LIGHT_TIER_MB`, `BENCH_SEED`, `--count`, `--with-synthetic`, `--langs-per-problem`, `--max-candidates`, `--validate-cases`. See [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md) §6.
+### 4. Benchmarking
 
----
+No benchmark harness is currently committed. The harness and its results were withdrawn along with
+the numbers they produced; the replacement is specified in [`docs/TEST_PLAN.md`](TEST_PLAN.md).
 
-## 10. Team
+
+## 07. Team
 
 | Name | Role | Responsibilities |
 |---|---|---|
