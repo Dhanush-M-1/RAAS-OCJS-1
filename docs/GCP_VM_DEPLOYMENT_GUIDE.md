@@ -452,8 +452,8 @@ The judge accepts `POST /submit`; the harness is
 
 Run it **on the VM, against `127.0.0.1:3000`**. That keeps the IAP tunnel's round-trip
 latency out of `e2e_request_to_verdict_ms`, which otherwise inflates that column by
-roughly 130 ms per request. §9.6 covers the laptop route if you prefer it for interactive
-checks.
+roughly 130 ms per request. §9.6 covers interactive checks from a local terminal, which are useful
+for development and are not publishable.
 
 ### 9.1 Subcommands
 
@@ -492,8 +492,8 @@ sudo usermod -aG docker "$USER"
 sudo apt-get update
 sudo apt-get install -y python3-venv python3-pip
 
-# Back up the committed CSVs: the harness writes fixed filenames.
-cp -r benchmarks/results benchmarks/results.laptop-baseline
+# Back up any existing results before a run, since the harness writes fixed filenames.
+cp -r benchmarks/results benchmarks/results.baseline-backup
 
 # Python environment for the harness.
 python3 -m venv .benchvenv
@@ -578,11 +578,11 @@ and rewrites the four derived files
 [`raas_benchmark.py`](../benchmarks/raas_benchmark.py:1413)).
 `python3 benchmarks/raas_benchmark.py all` does `run` → `simulate` in one step.
 
-> **Caveat on the simulation output.** `simulate` still derives capacity from the
-> hardcoded laptop `HOST_SPECS` ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:128))
-> and cloud price from an AWS `c6i.4xlarge`
-> ([`raas_benchmark.py`](../benchmarks/raas_benchmark.py:143)). Present its slot-count and
-> cloud-projection figures as **analytic projections**, never as GCP measurements.
+> **Caveat on the simulation output.** `simulate` derived capacity from a hardcoded host spec and a
+> cloud price for an AWS instance, neither of which matched the VM. Its slot-count and
+> cloud-projection figures were **analytic projections, never measurements**. The withdrawn harness
+> is not to be reinstated; `docs/TEST_PLAN.md` E0.5 requires the replacement to have no simulation
+> subcommand at all.
 
 ### 9.5 Collect the artifacts
 
@@ -624,9 +624,14 @@ empirical CSV should hold 400 data rows.
 wc -l raas-artifacts/results/real_dataset_empirical_runs_tier256.csv   # expect 402
 ```
 
-### 9.6 Alternative: run from your laptop
+### 9.6 The VM is the only testbed
 
-Open the tunnel in a terminal that stays running:
+**No number is ever gathered from a developer machine.** The VM is the testbed for every experiment;
+results produced any other way are not publishable, because the tunnel's latency enters the measured
+end-to-end time, and a developer machine differs from the instance in core count, cache and available
+RAM — all of which move the promotion race.
+
+For interactive checks while developing, an IAP tunnel from a local terminal is fine:
 
 ```bash
 gcloud compute start-iap-tunnel raas-judge 3000 \
@@ -634,21 +639,8 @@ gcloud compute start-iap-tunnel raas-judge 3000 \
   --zone=asia-south1-a --project=raas-ocjs
 ```
 
-Then, in another terminal:
-
-```bash
-cd /path/to/RAAS-OCJS
-python3 -m venv .benchvenv && . .benchvenv/bin/activate && pip install requests
-export JUDGE_URL=http://localhost:3000
-export RAAS_AUTH_TOKEN=$(gcloud compute ssh raas-judge \
-  --zone=asia-south1-a --project=raas-ocjs --tunnel-through-iap \
-  --command='sudo cat /etc/raas/judge.env' | sed 's/RAAS_AUTH_TOKEN=//')
-python3 benchmarks/raas_benchmark.py probe
-```
-
-Convenient for interactive checks, but the tunnel's latency enters
-`e2e_request_to_verdict_ms`, and `preflight`'s docker section fails locally because the
-runtime images exist only on the VM. Do not publish numbers gathered this way.
+Use it to confirm the judge is alive, never to collect data. Any run intended for the paper is executed
+on the VM itself, detached, per §9.4.
 
 ### 9.7 Promotion evidence
 
@@ -968,7 +960,7 @@ sudo chown -R "$USER":"$USER" /opt/raas
 cd /opt/raas
 sudo usermod -aG docker "$USER"                   # reconnect afterwards
 sudo apt-get update && sudo apt-get install -y python3-venv python3-pip
-cp -r benchmarks/results benchmarks/results.laptop-baseline
+cp -r benchmarks/results benchmarks/results.baseline-backup
 python3 -m venv .benchvenv && . .benchvenv/bin/activate && pip install requests
 
 export JUDGE_URL=http://127.0.0.1:3000

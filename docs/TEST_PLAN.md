@@ -24,6 +24,31 @@ table or figure in the paper, or it does not run.
 - **Title and abstract may not contain math or special symbols.**
 - All template guidance text must be removed before submission.
 
+## I.1a Testbed
+
+**The testbed is a Google Cloud Platform VM, and nothing else.** The deployment target is a single
+`e2-standard-4` (4 vCPU, 16 GB) in `asia-south1`, provisioned from `deploy/terraform`, reached only
+over an IAP tunnel. Every number in the paper must come from that instance.
+
+No developer workstation, laptop or bare-metal host appears anywhere in the paper — not as a testbed,
+not as a calibration source, not as a footnote. The paper reports one environment; stating two would
+invite the question of which result came from which, and the corpus, cache and core-count differences
+between them are large enough to move the promotion race.
+
+Consequences for the experiments below:
+
+- **Usable host budget is the VM's**, not a workstation's: derive it from the instance shape at run
+  time and record it, rather than assuming a fixed figure.
+- **E8 is a scaling experiment across identical VMs**, not a comparison between a local host and a
+  cloud one.
+- **Corpus construction is measured on the VM.** There is no separate calibration corpus from a
+  different machine to fold in.
+- Every result directory's `PROVENANCE.md` records the instance type, region and zone.
+
+**Cost note.** The VM bills while it exists. Every experiment that provisions one must record the
+hourly rate, the elapsed hours, the total, and the teardown command in the paper's deployment
+section.
+
 ## I.2 The claim set
 
 The paper asserts four things and nothing more. Each is separately falsifiable; the paper must survive
@@ -221,10 +246,10 @@ const MAX_CONCURRENT: usize = 16;   // plain Semaphore, tier-independent
 There is **no memory-aware admission** anywhere in the server. The tier changes what a *container* may
 allocate; it does not change *how many run*.
 
-Consequence: at 16 × 256 MiB = 4 GiB on a 15 GiB host, the host sits at ~28% RAM and is **never under
-memory pressure at any load**. Arrivals queue on the semaphore, not on memory. The scenario the thesis
-is about cannot currently occur. This is why **E3 requires a code change**, and why every queueing
-number produced so far was simulated.
+Consequence: at 16 × 256 MiB = 4 GiB against the `e2-standard-4`'s usable budget, the instance sits at
+roughly a quarter of its RAM and is **never under memory pressure at any load**. Arrivals queue on the
+semaphore, not on memory. The scenario the thesis is about cannot currently occur. This is why **E3
+requires a code change**, and why every queueing number produced so far was simulated.
 
 ## II.5 Evidence grades
 
@@ -466,23 +491,25 @@ and the achievable ratio is 16×, not 8×.
 
 **Effort.** Small.
 
-## E8 — Multi-host / cloud → T8 (only if the single-host result holds)
+## E8 — Multi-VM scaling → T8 (only if the single-VM result holds)
 
-**Question.** Does the advantage survive when admission spans more than one host?
+**Question.** Does the advantage survive when admission spans more than one VM?
 
-**Procedure.** Deploy to GCP `e2-standard-4` in `asia-south1`; run the E2/E3 matrix there; if feasible,
-add a second host behind a dispatcher computing admission from aggregate reservation.
+**Procedure.** The `e2-standard-4` in `asia-south1` is the testbed for every experiment, so E1–E7 run on
+it directly. E8 adds a **second VM of the same shape** behind a dispatcher that computes admission from
+aggregate reservation, and repeats the E2/E3 matrix across the pair.
 
-**Controls.** Same corpus and schedule as the single-host runs, so the only difference is the host.
+**Controls.** Same instance shape, corpus, schedule and configuration as the single-VM runs, so the only
+difference is the number of VMs.
 
 **Metrics.** Sustained rate, correctness, reservation, coordination overhead.
 
 **Paper element.** T8 — **measured rows only**. Any derived row must be marked `D` in the caption.
 
-**Kill condition.** If the advantage vanishes with coordination, state the result as single-host only.
+**Kill condition.** If the advantage vanishes with coordination, state the result as single-VM only.
 
-**Effort.** Large, and the only experiment with a recurring cost. Record the hourly and monthly figure
-and the teardown command in the paper's deployment section.
+**Effort.** Large, and the only experiment that provisions more than one billable instance. Record the
+hourly and monthly figure and the teardown command in the paper's deployment section.
 
 ---
 
@@ -513,8 +540,10 @@ repeated trials and a reported distribution, never a single sample.
 
 # Part VI — Threats to validity
 
-- **Single host, single instance type.** Cache, memory bandwidth and core count all move the promotion
-  race.
+- **Single instance type.** All measurements come from one `e2-standard-4` shape. Cache, memory
+  bandwidth and core count all move the promotion race, so the result is a statement about that shape
+  rather than about cloud hardware in general. E8 tests whether it generalises to a second VM of the
+  same shape; it does not test a different shape.
 - **Synthetic heavy submissions were authored to trigger the mechanism.** They cannot evidence that
   promotion triggers in the wild. If they appear, T1 must separate them and F2 must distinguish them.
 - **Language coverage.** C is a small fraction of the corpus; any per-language conclusion about C is
@@ -540,7 +569,7 @@ repeated trials and a reported distribution, never a single sample.
 | 6 | **E3** adaptive vs static under dynamic admission | the central experiment |
 | 7 | **E5** oracle-prediction comparison | settles C4 as a property of prediction |
 | 8 | **E7** tier floor | bounds the supported range |
-| 9 | **E8** cloud / multi-host | only if the single-host result holds |
+| 9 | **E8** multi-VM scaling | only if the single-VM result holds |
 
 **Stop conditions.**
 - E1 shows demand is not bimodal → stop, re-scope the whole project.
