@@ -93,7 +93,8 @@ Submissions run inside dedicated rootless/daemon sandboxes utilizing Linux cgrou
   - `memory.high`: Soft watermark set to 179.2 MiB (`HIGH_WATERMARK_PCT = 70`, i.e. 70% of `memory.max`). Docker sets `memory.max` but not `memory.high`, so the judge writes it. When breached, the kernel throttles memory allocations and increments `memory.events (high)`, allowing the monitor to safely promote the container *before* an OOM killer terminates it.
 - **Microsecond Kernel CPU Accounting**:
   - Direct reading of `usage_usec` from `cpu.stat` before and after each test case execution:
-    $$\Delta \text{CPU} = \frac{\text{usage\_usec}_{\text{after}} - \text{usage\_usec}_{\text{before}}}{1000} \text{ ms}$$
+    $$\Delta \text{CPU} = \frac{U_{\text{after}} - U_{\text{before}}}{1000} \text{ ms}$$
+    where $U$ is the `usage_usec` counter at each sample.
   - Completely excludes Docker CLI, containerd, and runc process invocation latency, delivering stable, deterministic metrics across runs.
 
 ### 2.4 Reactive Monitor & Live Tier Migration (`server/src/moderator.rs`)
