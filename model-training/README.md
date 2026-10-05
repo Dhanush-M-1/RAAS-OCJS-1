@@ -261,7 +261,6 @@ C++ r=0.3648, C r=0.3107, Java r=0.2615), so a length threshold is a weak proxy 
 thing being predicted. The 2,520 unique problems (vs CodeContests' 148) also let the
 test split measure generalisation to unseen problems.
 
-![Model Comparison Chart](model_comparison.png)
 
 ---
 
