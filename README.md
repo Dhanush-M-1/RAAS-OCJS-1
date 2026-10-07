@@ -1,8 +1,8 @@
 # RAAS-OCJS
 
-**Resource-Aware Adaptive Scheduling for Online Competitive Judge Systems**
+**Resource-Aware Adaptive Scheduling for Online Coding Judge Systems**
 
-A next-generation competitive programming judge combining **predictive AST-based classification** with **reactive, event-driven Linux cgroup v2 monitoring** to enable dynamic, mid-execution isolation-tier migration on fixed, self-hosted hardware.
+A next-generation coding programming judge combining **predictive AST-based classification** with **reactive, event-driven Linux cgroup v2 monitoring** to enable dynamic, mid-execution isolation-tier migration on fixed, self-hosted hardware.
 
 > **Final-Year Project**  
 > Department of Computer Science and Engineering, Easwari Engineering College.  
